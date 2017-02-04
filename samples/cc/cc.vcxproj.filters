@@ -1,0 +1,103 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="utils">
+      <UniqueIdentifier>{ea7f8508-5651-4ff0-bac3-f1814cddadf1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute">
+      <UniqueIdentifier>{4f76d359-70cc-4cf1-8a32-ae2c004687c7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\internal">
+      <UniqueIdentifier>{eaf48a8c-5c97-42eb-b94c-a6ee1cc78c3b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\graphs">
+      <UniqueIdentifier>{562324f0-0dc5-459f-9f65-b7899dff54aa}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\include\groute\event_pool.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\common.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\memory_pool.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\context.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\router.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\parser.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\stopwatch.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\utils.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\interactor.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\memcpy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\markers.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\common.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\coo_graph.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\csr_graph.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\worker.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="cc_common.h" />
+    <ClInclude Include="cc_config.h" />
+    <ClInclude Include="cc_context.h" />
+    <ClInclude Include="cc_kernels.cuh" />
+    <ClInclude Include="cc_load.h" />
+    <ClInclude Include="cc_partitioner.h" />
+    <ClInclude Include="..\..\include\groute\link.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\..\src\utils\parser.cpp">
+      <Filter>utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\utils\utils.cpp">
+      <Filter>utils</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="cc_async.cu" />
+  </ItemGroup>
+</Project>

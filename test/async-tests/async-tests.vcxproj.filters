@@ -1,0 +1,84 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CudaCompile Include="circular_worklist_test.cu" />
+    <CudaCompile Include="worklist_test.cu" />
+    <CudaCompile Include="router_test.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="groute">
+      <UniqueIdentifier>{800af96a-e0fe-4283-922e-473dd0c78dcf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\graphs">
+      <UniqueIdentifier>{6ec69d32-a0da-4f4f-8668-10044be55711}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\internal">
+      <UniqueIdentifier>{7f746429-3cc4-4aa8-9e21-5cce38127a3d}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\include\groute\common.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\context.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\cta_work.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\event_pool.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\link.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\memcpy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\memory_pool.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\router.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\common.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\coo_graph.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\csr_graph.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\worker.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
+      <Filter>groute\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\fused_worker.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

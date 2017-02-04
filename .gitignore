@@ -53,24 +53,15 @@ _ReSharper*/
 *.opensdf
 *~
 build/
-*.aux
-*.synctex.gz
-
-*.bbl
-*.blg
-*.pgm
 /CMakeCache.txt
-
 *~*.tmp
-*~
 *~$*
 /CMakeFiles/
 /Makefile
 /cmake_install.cmake
-*data_batch*
-batches.meta
 *.amplxeproj
 *.mcp
 
 */*-build/
 */*build*/
+metis/
