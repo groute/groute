@@ -22,6 +22,7 @@ find_package(METIS QUIET)
 if (NOT METIS_FOUND)
   # Otherwise, try to find a local copy
   if (EXISTS "${PROJECT_SOURCE_DIR}/metis/")
+    set(GKLIB_PATH ${PROJECT_SOURCE_DIR}/metis/GKlib CACHE PATH "path to GKlib" FORCE)
     add_subdirectory(metis)
     set(METIS_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/metis/include)
     set(METIS_LIBRARIES metis)
