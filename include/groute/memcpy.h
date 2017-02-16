@@ -54,8 +54,8 @@ namespace groute {
     class MemcpyWork : public groute::internal::IWork
     {
     public:
-        int src_dev_id;
-        int dst_dev_id;
+        int physical_src_dev;
+        int physical_dst_dev;
 
         size_t copy_bytes;
         size_t dst_size;
@@ -80,8 +80,8 @@ namespace groute {
         {
             // Verifying since parameters are expected to be provided by multiple resources  
 
-            assert(!Device::IsNull(src_dev_id));
-            assert(!Device::IsNull(dst_dev_id));
+            assert(physical_src_dev != Device::Null);
+            assert(physical_dst_dev != Device::Null);
 
             assert(src_buffer != nullptr);
             assert(dst_buffer != nullptr);
@@ -94,21 +94,21 @@ namespace groute {
 
         void CopyAsync(void *dst_buffer, const void *src_buffer, size_t count) const
         {
-            if (!Device::IsHost(src_dev_id) && !Device::IsHost(dst_dev_id)) // dev to dev
+            if (physical_src_dev != Device::Host && physical_dst_dev != Device::Host) // dev to dev
             {
                 GROUTE_CUDA_CHECK(
                     cudaMemcpyPeerAsync(
-                    dst_buffer, dst_dev_id, src_buffer, src_dev_id, count, copy_stream));
+                    dst_buffer, physical_dst_dev, src_buffer, physical_src_dev, count, copy_stream));
             }
 
-            else if (Device::IsHost(src_dev_id)) // host to dev
+            else if (physical_src_dev == Device::Host) // host to dev
             {
                 GROUTE_CUDA_CHECK(
                     cudaMemcpyAsync(
                     dst_buffer, src_buffer, count, cudaMemcpyHostToDevice, copy_stream));
             }
 
-            else if (Device::IsHost(dst_dev_id)) // dev to host
+            else if (physical_dst_dev == Device::Host) // dev to host
             {
                 GROUTE_CUDA_CHECK(
                     cudaMemcpyAsync(
@@ -117,7 +117,7 @@ namespace groute {
 
             else // host to host
             {
-                assert(false); // TODO: std::memcpy(dst_buffer, src_buffer, count);
+                std::memcpy(dst_buffer, src_buffer, count);
             }
         }
         
@@ -129,7 +129,7 @@ namespace groute {
     public:
         MemcpyWork(EventPool& event_pool, int fragment_size = -1) :
             m_event_pool(event_pool),
-            src_dev_id(Device::Null), dst_dev_id(Device::Null),
+            physical_src_dev(Device::Null), physical_dst_dev(Device::Null),
             fragment_size(fragment_size), copy_bytes(0), dst_size(0),
             src_buffer(nullptr), dst_buffer(nullptr),
             copy_stream(nullptr), sync_event(nullptr), completion_callback(nullptr)
@@ -158,8 +158,8 @@ namespace groute {
             {
                 // Fragmented Copy 
 
-                int fragment = fragment_size < 0 ? copy_bytes : fragment_size;
-                int pos = 0;
+                size_t fragment = fragment_size < 0 ? copy_bytes : fragment_size;
+                size_t pos = 0;
                 while (pos < copy_bytes)
                 {
                     void *receive = ((void*)((char*)dst_buffer + pos));
@@ -191,14 +191,14 @@ namespace groute {
     class MemcpyInvoker : public IMemcpyInvoker
     {
     protected:
-        const int m_dev_id; // the real dev id
+        const int m_physical_dev; // the physical device id
         cudaStream_t m_copy_stream;
         cudaEvent_t m_sync_event;
 
     public:
-        MemcpyInvoker(int dev_id) : m_dev_id(dev_id)
+        MemcpyInvoker(int physical_dev) : m_physical_dev(physical_dev)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(m_dev_id));
+            GROUTE_CUDA_CHECK(cudaSetDevice(m_physical_dev));
             GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&m_copy_stream, cudaStreamNonBlocking));
             GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&m_sync_event, cudaEventDisableTiming));
         }
@@ -216,15 +216,15 @@ namespace groute {
             int current_dev;
             GROUTE_CUDA_CHECK(cudaGetDevice(&current_dev));
 
-            if(current_dev != m_dev_id)
-                GROUTE_CUDA_CHECK(cudaSetDevice(m_dev_id));
+            if(current_dev != m_physical_dev)
+                GROUTE_CUDA_CHECK(cudaSetDevice(m_physical_dev));
 
             memcpy_work->copy_stream = m_copy_stream;
             memcpy_work->sync_event = m_sync_event;
 
             (*memcpy_work)(nullptr); // invoke
 
-            if(current_dev != m_dev_id) // set back to the correct device
+            if(current_dev != m_physical_dev) // set back to the correct device
                 GROUTE_CUDA_CHECK(cudaSetDevice(current_dev));
         }
     };
@@ -232,7 +232,7 @@ namespace groute {
     class MemcpyWorker : public groute::internal::Worker < MemcpyWork >, public IMemcpyInvoker
     {
     private:
-        const int m_dev_id; // the real dev id
+        const int m_physical_dev; // the physical device id
         cudaStream_t m_copy_stream;
         cudaEvent_t m_sync_event;
 
@@ -240,7 +240,7 @@ namespace groute {
         /// Called by the worker thread on start
         void OnStart() override
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(m_dev_id));
+            GROUTE_CUDA_CHECK(cudaSetDevice(m_physical_dev));
             GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&m_copy_stream, cudaStreamNonBlocking));
             GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&m_sync_event, cudaEventDisableTiming));
         }
@@ -252,8 +252,8 @@ namespace groute {
         }
 
     public:
-        explicit MemcpyWorker(int dev_id)
-            : groute::internal::Worker<MemcpyWork>(nullptr), m_dev_id(dev_id)
+        explicit MemcpyWorker(int physical_dev)
+            : groute::internal::Worker<MemcpyWork>(nullptr), m_physical_dev(physical_dev)
         {
             this->Run();
         }

@@ -177,7 +177,7 @@ namespace groute {
         {
             if (m_size == 0) Init(); // lazy init 
 
-            size = m_size*hint;
+            size = (size_t)(m_size*hint);
 
             if (flags & AF_PO2)
             {

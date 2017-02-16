@@ -98,11 +98,11 @@ void FragmentedCopy(size_t buffer_size, size_t mtu)
 
     auto copy = std::make_shared<groute::MemcpyWork>(context.GetEventPool(0), mtu);
 
-    copy->src_dev_id = groute::Device::Host;
+    copy->physical_src_dev = groute::Device::Host;
     copy->src_buffer = &host[0];
     copy->copy_bytes = host.size() * sizeof(int);
 
-    copy->dst_dev_id = 0;
+    copy->physical_dst_dev = 0;
     copy->dst_buffer = dev;
     copy->dst_size = host.size() * sizeof(int);
 
@@ -154,15 +154,15 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
         context.EnableFragmentation(fragment_size);
 
     groute::router::Router<int> router(context, 
-        groute::router::Policy::CreateScatterPolicy(groute::Device::Host, range(ngpus)));
+        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
 
-    groute::router::ISender<int>* host_sender = router.GetSender(groute::Device::Host); 
+    groute::router::ISender<int>* host_sender = router.GetSender(groute::Endpoint::HostEndpoint()); 
 
     std::vector<int*> dev_sums(ngpus);
     std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > dev_receivers;
     std::vector< std::thread > dev_threads;
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         // Init dev sums
         context.SetDevice(i);
@@ -177,7 +177,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
     host_sender->Send(groute::Segment<int>(&host_buffer[0], buffer_size, buffer_size, 0), groute::Event());
     host_sender->Shutdown();
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         // Sync (for pre loading case)
         dev_receivers[i]->Sync();
@@ -261,11 +261,11 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     if (fragment_size > 0)
         context.EnableFragmentation(fragment_size);
 
-    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Device::Host, range(ngpus)));
+    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
     groute::router::Router<int> reduction_router(context, groute::router::Policy::CreateOneWayReductionPolicy(ngpus));
     
-    groute::router::ISender<int>* host_sender = input_router.GetSender(groute::Device::Host); 
-    groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Device::Host); // TODO
+    groute::router::ISender<int>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint()); 
+    groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint()); // TODO
 
     std::vector<int*> dev_bins(ngpus);
     std::vector< groute::Link<int> > input_links;
@@ -273,7 +273,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     std::vector< groute::Link<int> > reduction_out_links;
     std::vector< std::thread > dev_threads;
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         context.SetDevice(i);
         CUASSERT_NOERR(cudaMalloc(&dev_bins[i], bins * sizeof(int)));
@@ -288,7 +288,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     host_sender->Send(groute::Segment<int>(&host_input[0], buffer_size, buffer_size, 0), groute::Event());
     host_sender->Shutdown();
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         // Run threads  
         std::thread dev_worker([&, i]()

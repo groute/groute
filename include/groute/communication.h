@@ -153,27 +153,27 @@ namespace groute {
         private:
             IReceiver<T>* m_receiver;
             size_t m_chunk_size;
-            std::vector <T*> m_dev_buffers;
+            std::vector <T*> m_endpoint_buffers;
             std::deque  < std::shared_future< PendingSegment<T> > > m_promised_segments;
-            device_t m_dev;
+            Endpoint m_endpoint;
             groute::Context& m_ctx;
 
         public:
-            PipelinedReceiver(groute::Context& context, IReceiver<T>* receiver, device_t dev, size_t chunk_size, size_t num_buffers = 2) :
-                m_receiver(receiver), m_chunk_size(chunk_size), m_dev_buffers(num_buffers), m_dev(dev), m_ctx(context)
+            PipelinedReceiver(groute::Context& context, IReceiver<T>* receiver, Endpoint endpoint, size_t chunk_size, size_t num_buffers = 2) :
+                m_receiver(receiver), m_chunk_size(chunk_size), m_endpoint_buffers(num_buffers), m_endpoint(endpoint), m_ctx(context)
             {
-                context.SetDevice(dev);
+                context.SetDevice(endpoint);
 
                 if (!m_receiver->Active()) // inactive receiver, no need for buffers
                 {
                     m_chunk_size = 0;
-                    m_dev_buffers.clear();
+                    m_endpoint_buffers.clear();
                 }
 
-                for (size_t i = 0; i < m_dev_buffers.size(); ++i)
+                for (size_t i = 0; i < m_endpoint_buffers.size(); ++i)
                 {
                     T *buffer;
-                    if (dev != Device::Host)
+                    if (!endpoint.IsHost())
                     {
                         GROUTE_CUDA_CHECK(cudaMalloc((void**)&buffer, m_chunk_size * sizeof(T)));
                     }
@@ -181,28 +181,28 @@ namespace groute {
                     {
                         GROUTE_CUDA_CHECK(cudaMallocHost((void**)&buffer, m_chunk_size * sizeof(T)));
                     }
-                    m_dev_buffers[i] = buffer;
+                    m_endpoint_buffers[i] = buffer;
                 }
 
-                for (size_t i = 0; i < m_dev_buffers.size(); ++i)
+                for (size_t i = 0; i < m_endpoint_buffers.size(); ++i)
                 {
-                    m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(m_dev_buffers[i], m_chunk_size), Event()));
+                    m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(m_endpoint_buffers[i], m_chunk_size), Event()));
                 }
             }
 
             ~PipelinedReceiver()
             {
-                m_ctx.SetDevice(m_dev);
+                m_ctx.SetDevice(m_endpoint);
 
-                for (size_t i = 0; i < m_dev_buffers.size(); ++i)
+                for (size_t i = 0; i < m_endpoint_buffers.size(); ++i)
                 {
-                    if (m_dev != Device::Host)
+                    if (!m_endpoint.IsHost())
                     {
-                        GROUTE_CUDA_CHECK(cudaFree(m_dev_buffers[i]));
+                        GROUTE_CUDA_CHECK(cudaFree(m_endpoint_buffers[i]));
                     }
                     else
                     {
-                        GROUTE_CUDA_CHECK(cudaFreeHost(m_dev_buffers[i]));
+                        GROUTE_CUDA_CHECK(cudaFreeHost(m_endpoint_buffers[i]));
                     }
                 }
             }
@@ -235,7 +235,7 @@ namespace groute {
             {
                 T* buffer = segment.GetSegmentPtr();
 #ifndef NDEBUG
-                if (std::find(m_dev_buffers.begin(), m_dev_buffers.end(), buffer) == m_dev_buffers.end())
+                if (std::find(m_endpoint_buffers.begin(), m_endpoint_buffers.end(), buffer) == m_endpoint_buffers.end())
                     throw std::exception(); // unrecognized buffer
 #endif
                 m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(buffer, m_chunk_size), ready_event));

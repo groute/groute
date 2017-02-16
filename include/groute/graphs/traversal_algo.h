@@ -271,7 +271,7 @@ namespace graphs {
                 std::vector< std::unique_ptr<Problem> > problems;
                 std::vector< std::unique_ptr<Solver> > solvers;
 
-                for (size_t i = 0; i < ngpus; ++i)
+                for (int i = 0; i < ngpus; ++i)
                 {
                     // Set device for possible internal allocations  
                     context.SetDevice(i);
@@ -293,9 +293,9 @@ namespace graphs {
                 std::vector<std::thread> workers;
                 groute::internal::Barrier barrier(ngpus + 1);
 
-                for (size_t ii = 0; ii < ngpus; ++ii)
+                for (int ii = 0; ii < ngpus; ++ii)
                 {
-                    auto dev_func = [&](size_t i)
+                    auto dev_func = [&](int i)
                     {
                         context.SetDevice(i);
                         groute::Stream stream = context.CreateStream(i);
@@ -339,7 +339,7 @@ namespace graphs {
 
                 printf("\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
 
-                for (size_t i = 0; i < ngpus; ++i)
+                for (int i = 0; i < ngpus; ++i)
                 {
                     // Join workers  
                     workers[i].join();
@@ -423,7 +423,7 @@ namespace graphs {
                 std::vector< std::unique_ptr<Problem> > problems;
                 std::vector< std::unique_ptr<Solver> > solvers;
 
-                for (size_t i = 0; i < ngpus; ++i)
+                for (int i = 0; i < ngpus; ++i)
                 {
                     // Set device for possible internal allocations  
                     context.SetDevice(i);
@@ -445,7 +445,7 @@ namespace graphs {
                 std::vector<std::thread> workers;
                 groute::internal::Barrier barrier(ngpus + 1);
 
-                for (size_t ii = 0; ii < ngpus; ++ii)
+                for (int ii = 0; ii < ngpus; ++ii)
                 {
                     auto dev_func = [&](size_t i)
                     {
@@ -491,7 +491,7 @@ namespace graphs {
 
                 printf("\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
 
-                for (size_t i = 0; i < ngpus; ++i)
+                for (int i = 0; i < ngpus; ++i)
                 {
                     // Join workers  
                     workers[i].join();
@@ -533,7 +533,7 @@ namespace graphs {
 
         void Solve(
             groute::Context& context,
-            groute::device_t dev,
+            groute::Endpoint endpoint,
             groute::DistributedWorklist<TLocal, TRemote>& distributed_worklist,
             groute::IDistributedWorklistPeer<TLocal, TRemote>* worklist_peer,
             groute::Stream& stream)
@@ -574,7 +574,7 @@ namespace graphs {
                     if (FLAGS_debug_print)
                     {
                         std::unique_lock<std::mutex> guard(distributed_worklist.log_gate);
-                        printf("\n\n\tDevice: %d\n%s->Input: ", (int)dev, Algo::Name());
+                        printf("\n\n\tDevice: %d\n%s->Input: ", (int)endpoint, Algo::Name());
                         input_worklist.PrintOffsetsDebug(stream);
                         printf("\n%s->Output: ", Algo::Name());
                         temp_worklist.PrintOffsetsDebug(stream);
@@ -585,7 +585,7 @@ namespace graphs {
                     distributed_worklist.ReportWork(
                         (int)new_work,
                         (int)performed_work,
-                        Algo::Name(), dev
+                        Algo::Name(), endpoint
                         );
                 }
             }

@@ -241,11 +241,11 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
 
     groute::Context ctx(ngpus);
 
-    auto gpu_work = [&](groute::device_t device, size_t maxout,
+    auto gpu_work = [&](groute::Endpoint device, size_t maxout,
                         groute::router::Router<T>& scatter,
                         groute::router::Router<T>& gather,
                         groute::internal::Barrier& barrier) {
-        groute::Stream stm(ctx.GetDevId(device));
+        groute::Stream stm(ctx.GetPhysicalDevice(device));
         groute::Link<T> sock_in(scatter, device, maxout, FLAGS_pipeline);
         groute::Link<T> sock_out(device, gather, maxout, FLAGS_pipeline);
 
@@ -315,13 +315,13 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
     ////////////////////////////////////////
 
     groute::router::Router<T> scatter(ctx, 
-        groute::router::Policy::CreateScatterPolicy(groute::Device::Host, range(ngpus)));
+        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
     groute::router::Router<T> gather(ctx,
-        groute::router::Policy::CreateGatherPolicy(groute::Device::Host, range(ngpus)));
+        groute::router::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
     size_t chunksize = FLAGS_chunksize;
 
-    groute::Link<T> dist(groute::Device::Host, scatter, chunksize, 1);
-    groute::Link<T> collect(gather, groute::Device::Host, chunksize, 2 * ngpus);
+    groute::Link<T> dist(groute::Endpoint::HostEndpoint(), scatter, chunksize, 1);
+    groute::Link<T> collect(gather, groute::Endpoint::HostEndpoint(), chunksize, 2 * ngpus);
 
     groute::internal::Barrier bar(ngpus + 1);
 
@@ -329,7 +329,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
 
 
     // Start GPU work threads
-    for (groute::device_t dev = 0; dev < ngpus; ++dev)
+    for (int dev = 0; dev < ngpus; ++dev)
     {   
         std::thread tdev(gpu_work, dev,
                          chunksize, std::ref(scatter), 

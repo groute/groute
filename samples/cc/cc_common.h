@@ -54,7 +54,7 @@ namespace cc
     {
         const Context& context;
 
-        int dev;
+        groute::Endpoint dev;
         dim3 block_dims;
         size_t compressed_size;
 
@@ -69,7 +69,7 @@ namespace cc
 
         Problem(
             const Context& context, 
-            const Partition& partition, int dev, dim3 block_dims) :
+            const Partition& partition, groute::Endpoint dev, dim3 block_dims) :
             context(context), partition(partition), 
             dev(dev), block_dims(block_dims), compressed_size(0)
         {

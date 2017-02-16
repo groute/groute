@@ -153,12 +153,12 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     //
     // Input routing  
     //
-    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Device::Host, range(ngpus)));    
+    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Device::Host, groute::Endpoint::Range(ngpus)));    
     groute::router::ISender<int>* input_sender = input_router.GetSender(groute::Device::Host); 
 
     std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > input_receivers;
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         auto receiver = input_router.CreatePipelinedReceiver(i, max_work_size, 1);
         input_receivers.push_back(std::move(receiver));
@@ -167,7 +167,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     srand(static_cast <unsigned> (22522));
     std::vector<int> host_worklist;
 
-    for (int ii = 0, count = work_size; ii < count; ++ii)
+    for (size_t ii = 0, count = work_size; ii < count; ++ii)
     {
         host_worklist.push_back((rand()*round_up(histo_size, RAND_MAX)) % histo_size);
     }
@@ -188,7 +188,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     std::vector<int*> dev_segs(ngpus);
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         context.SetDevice(i);
 
@@ -202,7 +202,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     std::vector<std::thread> workers;
     groute::internal::Barrier barrier(ngpus);
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         std::thread worker([&, i]()
         {
@@ -270,7 +270,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
         ++regression_segs[it];
     }
 
-    for (size_t i = 0; i < ngpus; ++i)
+    for (int i = 0; i < ngpus; ++i)
     {
         context.SetDevice(i);
         CUASSERT_NOERR(cudaMemcpy(&host_segs[i*histo_seg_size], dev_segs[i], histo_seg_size * sizeof(int), cudaMemcpyDeviceToHost));

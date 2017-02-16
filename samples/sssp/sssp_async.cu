@@ -618,7 +618,7 @@ public:
 
     void Solve(
         groute::graphs::traversal::Context<Algo>& context,
-        groute::device_t dev,
+        groute::Endpoint dev,
         groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist,
         groute::IDistributedWorklistPeer<local_work_t, remote_work_t>* worklist_peer,
         groute::Stream& stream)
@@ -720,7 +720,7 @@ public:
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
 
-            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Device::Host);
+            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint());
             work_sender->Send(
                  groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
             work_sender->Shutdown();

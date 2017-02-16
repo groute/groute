@@ -197,8 +197,8 @@ namespace groute {
         {
             virtual ~IDistributedWorklist() { }
 
-            virtual void ReportHighPrioWork(int new_work, int performed_work, const char* caller, device_t dev, bool initial = false) = 0;
-            virtual void ReportLowPrioWork(int new_work, int performed_work, const char* caller, device_t dev) = 0;
+            virtual void ReportHighPrioWork(int new_work, int performed_work, const char* caller, Endpoint dev, bool initial = false) = 0;
+            virtual void ReportLowPrioWork(int new_work, int performed_work, const char* caller, Endpoint dev) = 0;
 
             virtual int GetCurrentPrio() = 0;
 
@@ -487,7 +487,7 @@ namespace groute {
             DistributedWorklistPeer(
                 Context& context, router::IRouter<TRemote>& router,
                 IDistributedWorklist& distributed_worklist, int current_priority, const SplitOps& split_ops, DistributedWorklistFlags flags,
-                device_t dev, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs)
+                Endpoint dev, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs)
                 :
                 m_context(context), m_dev(dev), m_ngpus(ngpus), m_distributed_worklist(distributed_worklist),
                 m_current_priority(current_priority), m_split_ops(split_ops), m_flags(flags),
@@ -658,9 +658,9 @@ namespace groute {
             std::atomic<unsigned int> m_reported_work;
             std::vector<unsigned int> m_ctr;
         public:
-            unsigned int GetCurrentWorkCount(device_t dev)
+            unsigned int GetCurrentWorkCount(Endpoint dev)
             {
-                return m_ctr[dev + 1];
+                return m_ctr[(Endpoint::identity_type)dev + 1];
             }
 
         public:
@@ -691,7 +691,7 @@ namespace groute {
             }
 
             std::shared_ptr< IDistributedWorklistPeer<TLocal, TRemote> > CreatePeer(
-                device_t dev, const SplitOps& split_ops,
+                Endpoint dev, const SplitOps& split_ops,
                 size_t max_work_size, size_t max_exch_size, size_t exch_buffs, DistributedWorklistFlags flags = (DistributedWorklistFlags)(DW_WarpAppend | DW_HighPriorityReceive))
             {
                 m_context.SetDevice(dev);
@@ -709,14 +709,14 @@ namespace groute {
                 }
             }
 
-            void ReportHighPrioWork(int new_work, int performed_work, const char* caller, device_t dev, bool initialwork = false) override
+            void ReportHighPrioWork(int new_work, int performed_work, const char* caller, Endpoint dev, bool initialwork = false) override
             {
                 int work = new_work - performed_work;
 
                 if (FLAGS_count_work)
                 {
                     m_reported_work += performed_work;
-                    m_ctr[dev + 1] += performed_work;
+                    m_ctr[(Endpoint::identity_type)dev + 1] += performed_work;
                 }
 
                 if (work == 0) return;
@@ -750,14 +750,14 @@ namespace groute {
                 }
             }
 
-            void ReportLowPrioWork(int new_work, int performed_work, const char* caller, device_t dev) override
+            void ReportLowPrioWork(int new_work, int performed_work, const char* caller, Endpoint dev) override
             {
                 int work = new_work - performed_work;
 
                 if (FLAGS_count_work)
                 {
                     m_reported_work += performed_work;
-                    m_ctr[dev + 1] += performed_work;
+                    m_ctr[(Endpoint::identity_type)dev + 1] += performed_work;
                 }
 
                 if (work == 0) return;

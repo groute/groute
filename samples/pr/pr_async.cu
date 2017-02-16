@@ -578,7 +578,7 @@ namespace pr
 
         void Solve(
             groute::Context& context,
-            groute::device_t dev,
+            groute::Endpoint dev,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist,
             groute::IDistributedWorklistPeer<local_work_t, remote_work_t>* worklist_peer,
             groute::Stream& stream)

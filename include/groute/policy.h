@@ -44,57 +44,57 @@ namespace groute {
     namespace router {
 
         /**
-        * @brief A general purpose Policy object based on a topology
+        * @brief A general purpose Policy object based on a routing table 
         */
         class Policy : public IPolicy
         {
         private:
-            RoutingTable m_topology;
+            RoutingTable m_routing_table;
             RouteStrategy m_strategy;
 
         public:
-            Policy(const RoutingTable& topology, RouteStrategy strategy = Availability) : m_topology(topology), m_strategy(strategy)
+            Policy(const RoutingTable& routing_table, RouteStrategy strategy = Availability) : m_routing_table(routing_table), m_strategy(strategy)
             {
             }
 
             RoutingTable GetRoutingTable() override
             {
-                return m_topology;
+                return m_routing_table;
             }
 
-            Route GetRoute(device_t src_dev, void* message_metadata) override
+            Route GetRoute(Endpoint src, void* message_metadata) override
             {
-                assert(m_topology.find(src_dev) != m_topology.end());
+                assert(m_routing_table.find(src) != m_routing_table.end());
 
-                return Route(m_topology.at(src_dev), m_strategy);
+                return Route(m_routing_table.at(src), m_strategy);
             }
 
-            static std::shared_ptr<IPolicy> CreateBroadcastPolicy(device_t src_dev, const std::vector<device_t>& dst_devs)
+            static std::shared_ptr<IPolicy> CreateBroadcastPolicy(Endpoint src, const EndpointList& dst_endpoints)
             {
                 RoutingTable topology;
-                topology[src_dev] = dst_devs;
+                topology[src] = dst_endpoints;
                 return std::make_shared<Policy>(topology, Broadcast);
             }
 
-            static std::shared_ptr<IPolicy> CreateScatterPolicy(device_t src_dev, const std::vector<device_t>& dst_devs)
+            static std::shared_ptr<IPolicy> CreateScatterPolicy(Endpoint src, const EndpointList& dst_endpoints)
             {
                 RoutingTable topology;
-                topology[src_dev] = dst_devs;
+                topology[src] = dst_endpoints;
                 return std::make_shared<Policy>(topology, Availability);
             }
 
-            static std::shared_ptr<IPolicy> CreateP2PPolicy(device_t src_dev, device_t dst_dev)
+            static std::shared_ptr<IPolicy> CreateP2PPolicy(Endpoint src, Endpoint dst)
             {
                 RoutingTable topology;
-                topology[src_dev] = { dst_dev };
+                topology[src] = { dst };
                 return std::make_shared<Policy>(topology, Availability);
             }
 
-            static std::shared_ptr<IPolicy> CreateGatherPolicy(device_t dst_dev, const std::vector<device_t>& src_devs)
+            static std::shared_ptr<IPolicy> CreateGatherPolicy(Endpoint dst, const EndpointList& src_endpoints)
             {
                 RoutingTable topology;
-                for (const device_t& src_dev : src_devs)
-                    topology[src_dev] = { dst_dev };
+                for (const auto& src : src_endpoints)
+                    topology[src] = { dst };
                 return std::make_shared<Policy>(topology, Availability);
             }
 
@@ -104,22 +104,22 @@ namespace groute {
 
                 // Each device N can send to devices [0...N-1]
 
-                RoutingTable topology;
+                RoutingTable routing_table;
 
-                for (device_t i = 0; i < ndevs; i++)
+                for (Endpoint::identity_type i = 0; i < ndevs; i++)
                 {
-                    topology[i] = range(i);
+                    routing_table[i] = Endpoint::Range(i);
                 }
-                topology[0].push_back(Device::Host);
+                routing_table[0].push_back(Endpoint::HostEndpoint());
 
-                return std::make_shared<Policy>(topology, Availability);
+                return std::make_shared<Policy>(routing_table, Availability);
             }
 
             static std::shared_ptr<IPolicy> CreateTreeReductionPolicy(int ndevs)
             {
                 assert(ndevs > 0);
 
-                RoutingTable topology;
+                RoutingTable routing_table;
 
 
                 // 0
@@ -137,7 +137,7 @@ namespace groute {
 
                 while (p > 0)
                 {
-                    for (int i = 0; i < p; i++)
+                    for (unsigned int i = 0; i < p; i++)
                     {
                         int to = stride*(2 * i);
                         int from = stride*(2 * i + 1);
@@ -145,7 +145,7 @@ namespace groute {
                         from = std::min(ndevs - 1, from);
                         if (from <= to) continue;
 
-                        topology[(device_t) from].push_back((device_t) to);
+                        routing_table[from].push_back(to);
                     }
 
                     p /= 2;
@@ -153,28 +153,28 @@ namespace groute {
                 }
 
                 // add host as a receiver for the drain device
-                topology[0].push_back(Device::Host);
+                routing_table[0].push_back(Endpoint::HostEndpoint());
 
-                return std::make_shared<Policy>(topology, Availability);
+                return std::make_shared<Policy>(routing_table, Availability);
             }
 
             static std::shared_ptr<IPolicy> CreateRingPolicy(int ndevs)
             {
                 assert(ndevs > 0);
 
-                RoutingTable topology;
+                RoutingTable routing_table;
 
                 for (device_t i = 0; i < ndevs; i++)
                 {
-                    topology[i] = { (i + 1) % ndevs };
+                    routing_table[i] = { (i + 1) % ndevs };
                 }
 
                 // Instead of pushing to GPU 0, we push tasks to the first available device,
                 // this is beneficial for the case where the first device is already utilized
                 // with a prior task.
-                topology[Device::Host] = range(ndevs); // for initial work from host
+                routing_table[Endpoint::HostEndpoint()] = Endpoint::Range(ndevs); // For initial work from host
 
-                return std::make_shared<Policy>(topology, Availability);
+                return std::make_shared<Policy>(routing_table, Availability);
             }
         };
     }

@@ -285,7 +285,7 @@ namespace groute {
         std::vector<cudaEvent_t> m_events;
         std::deque<cudaEvent_t> m_pool;
 
-        int m_dev_id; // the real device id
+        int m_physical_dev; // the physical device id
         mutable std::mutex m_mutex;
 
         void VerifyDev() const
@@ -293,9 +293,9 @@ namespace groute {
 #ifndef NDEBUG
             int actual_dev;
             GROUTE_CUDA_CHECK(cudaGetDevice(&actual_dev));
-            if(actual_dev != m_dev_id)
+            if(actual_dev != m_physical_dev)
             {
-                printf("\nWarning: actual dev: %d, expected dev: %d\n", actual_dev, m_dev_id);
+                printf("\nWarning: actual dev: %d, expected dev: %d\n", actual_dev, m_physical_dev);
             }
 #endif
         }
@@ -315,8 +315,8 @@ namespace groute {
         }
 
     public:
-        EventPool(int dev_id, size_t cached_evs = 0) : 
-            m_dev_id(dev_id)
+        EventPool(int physical_dev, size_t cached_evs = 0) : 
+            m_physical_dev(physical_dev)
         {
             m_events.reserve(cached_evs);
             CacheEvents(cached_evs);
@@ -324,7 +324,7 @@ namespace groute {
 
         void CacheEvents(size_t cached_evs)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(m_dev_id));
+            GROUTE_CUDA_CHECK(cudaSetDevice(m_physical_dev));
 
             std::lock_guard<std::mutex> guard(m_mutex);
 
@@ -338,7 +338,7 @@ namespace groute {
         int GetCachedEventsNum() const
         {
             std::lock_guard<std::mutex> guard(m_mutex);
-            return m_events.size();
+            return (int)m_events.size();
         }
 
         ~EventPool()
@@ -395,9 +395,9 @@ namespace groute {
         cudaStream_t    cuda_stream;
         cudaEvent_t     sync_event;
 
-        Stream(int dev_id, StreamPriority priority = SP_Default)
+        Stream(int physical_dev, StreamPriority priority = SP_Default)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(dev_id));
+            GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
             Init(priority);
         }
 

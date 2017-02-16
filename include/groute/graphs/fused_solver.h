@@ -72,11 +72,11 @@ namespace graphs {
             };
             uint32_t *m_kernel_internal_counter;
 
-            device_t m_dev;
+            Endpoint m_endpoint;
             std::vector<int> m_work_counts;
 
         public:
-            FusedSolver(Context<Algo>& context, ProblemType& problem) : m_problem(problem), m_dev(groute::Device::Null)
+            FusedSolver(Context<Algo>& context, ProblemType& problem) : m_problem(problem), m_endpoint()
             {
                 void* mem_buffer;
                 size_t mem_size;
@@ -173,7 +173,7 @@ namespace graphs {
                 {
                     for (size_t i = 0; i < m_work_counts.size(); i++)
                     {
-                        printf("%d, %llu, %d\n", m_dev, i, m_work_counts[i]);
+                        printf("%d, %llu, %d\n", m_endpoint, i, m_work_counts[i]);
                     }
                 }
 
@@ -191,12 +191,12 @@ namespace graphs {
 
             void Solve(
                 groute::Context& context,
-                groute::device_t dev,
+                groute::Endpoint endpoint,
                 groute::opt::DistributedWorklist<TLocal, TRemote, SplitOps>& dwl,
                 groute::opt::IDistributedWorklistPeer<TLocal, TRemote>* peer,
                 groute::Stream& stream)
             {
-                m_dev = dev;
+                m_endpoint = endpoint;
 
                 m_worklist_a.ResetAsync(stream.cuda_stream);
                 m_worklist_b.ResetAsync(stream.cuda_stream);
@@ -238,8 +238,8 @@ namespace graphs {
                         std::this_thread::yield();
                     
                     // Some work was done by init, report it   
-                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), dev);
-                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), dev);
+                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
                 }
 
                 while (dwl.HasWork())
@@ -253,12 +253,12 @@ namespace graphs {
                         int remote_in = rwl_in->GetLength(stream);
                         int remote_out = rwl_out->GetLength(stream);
 
-                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", dev, global_prio, high_in, low_in, remote_in, remote_out);
+                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", endpoint, global_prio, high_in, low_in, remote_in, remote_out);
                     }
 
                     if (FLAGS_count_work)
                     {
-                        Marker::MarkWorkitems(dwl.GetCurrentWorkCount(dev), "FusedWork");
+                        Marker::MarkWorkitems(dwl.GetCurrentWorkCount(endpoint), "FusedWork");
                     }
 
                     m_problem.DoFusedWork(
@@ -276,7 +276,7 @@ namespace graphs {
 
                     if (FLAGS_verbose)
                     {
-                        printf("%d - done kernel, LWC: %d, HWC: %d\n", dev, *m_work_counters[LOW_COUNTER], *m_work_counters[HIGH_COUNTER]);
+                        printf("%d - done kernel, LWC: %d, HWC: %d\n", endpoint, *m_work_counters[LOW_COUNTER], *m_work_counters[HIGH_COUNTER]);
                     }
 
                     // Wait until the signal has been processed by the sender thread
@@ -284,8 +284,8 @@ namespace graphs {
                     while (*host_send_signal != peer->GetLastSendSignal())
                         std::this_thread::yield();
 
-                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), dev);
-                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), dev);
+                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
 
                     if (FLAGS_count_work)
                     {
@@ -302,7 +302,7 @@ namespace graphs {
                             segs_size += seg.GetSegmentSize();
                         }
 
-                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", dev, segs_size, global_prio, dwl.GetCurrentPrio());
+                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", endpoint, segs_size, global_prio, dwl.GetCurrentPrio());
                     }
 
                     if (global_prio < dwl.GetCurrentPrio()) // priority is up

@@ -116,8 +116,8 @@ bool RunCCMAsyncAtomic(int ngpus)
         groute::router::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
         groute::router::Router<int> reduction_router(context, reduction_policy);
 
-        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Device::Host);
-        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Device::Host); // TODO
+        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint());
+        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint()); // TODO
 
         IntervalRangeMarker iter_rng(context.nedges, "begin");
 
@@ -136,7 +136,7 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         dim3 block_dims(MASYNC_BS, 1, 1);
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             problems.emplace_back(new cc::Problem(context, partitioner.parents_partitions[i], i, block_dims));
             solvers.emplace_back(new cc::Solver(context, *problems.back()));
@@ -147,7 +147,7 @@ bool RunCCMAsyncAtomic(int ngpus)
             solvers[i]->reduction_out = groute::Link<component_t>(i, reduction_router);
         }
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             // Sync the first copy operations (exclude from timing)
             solvers[i]->edges_in.Sync();
@@ -155,7 +155,7 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         groute::internal::Barrier barrier(ngpus + 1); // barrier for accurate timing  
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             // Run workers  
             std::thread worker(
@@ -174,7 +174,7 @@ bool RunCCMAsyncAtomic(int ngpus)
         Stopwatch sw(true); // all threads are running, start timing
         barrier.Sync();
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             // Join threads  
             workers[i].join();
