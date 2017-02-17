@@ -618,7 +618,7 @@ public:
 
     void Solve(
         groute::graphs::traversal::Context<Algo>& context,
-        groute::Endpoint dev,
+        groute::Endpoint endpoint,
         groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist,
         groute::IDistributedWorklistPeer<local_work_t, remote_work_t>* worklist_peer,
         groute::Stream& stream)
@@ -670,13 +670,13 @@ public:
                     new_work += (current_far_work - overall_far_work);
                     new_work += remote_output_worklist.GetAllocCountAndSync(stream); // get the work pushed and sync alloc-end  
 
-                    worklist_peer->SignalRemoteWork(context.RecordEvent(dev, stream.cuda_stream)); // signal
+                    worklist_peer->SignalRemoteWork(context.RecordEvent(endpoint, stream.cuda_stream)); // signal
 
                     // Report overall work
                     distributed_worklist.ReportWork(
                         new_work,
                         performed_work,
-                        Algo::Name(), dev
+                        Algo::Name(), endpoint
                         );
 
                     overall_far_work = current_far_work;
@@ -720,7 +720,7 @@ public:
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
 
-            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint());
+            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint(0));
             work_sender->Send(
                  groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
             work_sender->Shutdown();

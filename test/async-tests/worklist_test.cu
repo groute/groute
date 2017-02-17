@@ -153,8 +153,8 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     //
     // Input routing  
     //
-    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Device::Host, groute::Endpoint::Range(ngpus)));    
-    groute::router::ISender<int>* input_sender = input_router.GetSender(groute::Device::Host); 
+    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));    
+    groute::router::ISender<int>* input_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0)); 
 
     std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > input_receivers;
 

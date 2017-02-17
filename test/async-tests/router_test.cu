@@ -154,9 +154,9 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
         context.EnableFragmentation(fragment_size);
 
     groute::router::Router<int> router(context, 
-        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
+        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
 
-    groute::router::ISender<int>* host_sender = router.GetSender(groute::Endpoint::HostEndpoint()); 
+    groute::router::ISender<int>* host_sender = router.GetSender(groute::Endpoint::HostEndpoint(0)); 
 
     std::vector<int*> dev_sums(ngpus);
     std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > dev_receivers;
@@ -261,11 +261,11 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     if (fragment_size > 0)
         context.EnableFragmentation(fragment_size);
 
-    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
+    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
     groute::router::Router<int> reduction_router(context, groute::router::Policy::CreateOneWayReductionPolicy(ngpus));
     
-    groute::router::ISender<int>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint()); 
-    groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint()); // TODO
+    groute::router::ISender<int>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0)); 
+    groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint(0)); // TODO
 
     std::vector<int*> dev_bins(ngpus);
     std::vector< groute::Link<int> > input_links;

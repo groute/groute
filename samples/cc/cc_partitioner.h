@@ -225,7 +225,7 @@ namespace cc
 
         EdgeScatterPolicy(int ngpus)
         {
-            m_routing_table[groute::Endpoint::HostEndpoint()] = groute::Endpoint::Range(ngpus);
+            m_routing_table[groute::Endpoint::HostEndpoint(0)] = groute::Endpoint::Range(ngpus);
         }
 
         groute::RoutingTable GetRoutingTable() override
@@ -233,14 +233,14 @@ namespace cc
             return m_routing_table;
         }
 
-        groute::router::Route GetRoute(groute::Endpoint src_dev, void* message_metadata) override
+        groute::router::Route GetRoute(groute::Endpoint src, void* message_metadata) override
         {
-            assert(src_dev.IsHost());
+            assert(src.IsHost());
             groute::router::Route route;
 
             if (message_metadata == nullptr)
             {
-                route.dst_endpoints = m_routing_table[groute::Endpoint::HostEndpoint()];
+                route.dst_endpoints = m_routing_table[src];
             }
 
             else

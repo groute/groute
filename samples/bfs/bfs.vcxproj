@@ -179,6 +179,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\groute\common.h" />
+    <ClInclude Include="..\..\include\groute\communication.h" />
     <ClInclude Include="..\..\include\groute\context.h" />
     <ClInclude Include="..\..\include\groute\cta_work.h" />
     <ClInclude Include="..\..\include\groute\device_router.cuh" />
@@ -191,12 +192,14 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h" />
     <ClInclude Include="..\..\include\groute\graphs\fused_solver.h" />
     <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h" />
+    <ClInclude Include="..\..\include\groute\groute.h" />
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h" />
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h" />
     <ClInclude Include="..\..\include\groute\internal\worker.h" />
     <ClInclude Include="..\..\include\groute\link.h" />
     <ClInclude Include="..\..\include\groute\memcpy.h" />
     <ClInclude Include="..\..\include\groute\memory_pool.h" />
+    <ClInclude Include="..\..\include\groute\policy.h" />
     <ClInclude Include="..\..\include\groute\router.h" />
     <ClInclude Include="..\..\include\groute\worklist.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h" />

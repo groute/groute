@@ -118,13 +118,13 @@ namespace groute {
             int actual_ngpus;
             GROUTE_CUDA_CHECK(cudaGetDeviceCount(&actual_ngpus));
 
-            // build a simple one-to-one dev map  
+            // build a simple one-to-one endpoint map  
             for (int physical_dev = 0; physical_dev < actual_ngpus; ++physical_dev)
             {
                 m_endpoint_map[physical_dev] = physical_dev;
             }
             // host
-            m_endpoint_map[Endpoint::HostEndpoint()] = Device::Host;
+            m_endpoint_map[Endpoint::HostEndpoint(0)] = Device::Host;
 
             InitPhysicalDevs();
             CreateEventPools();
@@ -141,7 +141,7 @@ namespace groute {
                 m_endpoint_map[i] = i % actual_ngpus; // The real CUDA GPU index for all virtual GPUs
             }
             // host
-            m_endpoint_map[Endpoint::HostEndpoint()] = Device::Host;
+            m_endpoint_map[Endpoint::HostEndpoint(0)] = Device::Host;
             
             InitPhysicalDevs();
             CreateEventPools();
@@ -351,8 +351,15 @@ namespace groute {
 
         void* Alloc(Endpoint endpoint, double hint, size_t& size, AllocationFlags flags = AF_None)
         {
-            double vpp = (double)(m_endpoint_map.size() - 1) / m_physical_devs.size(); // virtual per physical
-            return m_memory_pools.at(m_endpoint_map.at(endpoint))->Alloc(hint / vpp, size, flags);
+            int physical_dev = m_endpoint_map.at(endpoint);
+
+            int endpoints = 0; // Count the number of endpoints using the physical device  
+            for (auto& p : m_endpoint_map)
+            {
+                if (p.second == physical_dev) ++endpoints;
+            }
+
+            return m_memory_pools.at(physical_dev)->Alloc(hint / endpoints, size, flags);
         }
 
         void* Alloc(size_t size)
@@ -366,9 +373,13 @@ namespace groute {
         {
             int current_physical_dev;
             GROUTE_CUDA_CHECK(cudaGetDevice(&current_physical_dev));
-            
-            double vpp = (double)(m_endpoint_map.size() - 1) / m_physical_devs.size(); // virtual per physical
-            return m_memory_pools.at(current_physical_dev)->Alloc(hint / vpp, size, flags);
+
+            int endpoints = 0; // Count the number of endpoints using the physical device  
+            for (auto& p : m_endpoint_map)
+            {
+                if (p.second == current_physical_dev) ++endpoints;
+            }
+            return m_memory_pools.at(current_physical_dev)->Alloc(hint / endpoints, size, flags);
         }
         
         // -----------------

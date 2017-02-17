@@ -110,7 +110,7 @@ namespace groute {
                 {
                     routing_table[i] = Endpoint::Range(i);
                 }
-                routing_table[0].push_back(Endpoint::HostEndpoint());
+                routing_table[0].push_back(Endpoint::HostEndpoint(0));
 
                 return std::make_shared<Policy>(routing_table, Availability);
             }
@@ -153,7 +153,7 @@ namespace groute {
                 }
 
                 // add host as a receiver for the drain device
-                routing_table[0].push_back(Endpoint::HostEndpoint());
+                routing_table[0].push_back(Endpoint::HostEndpoint(0));
 
                 return std::make_shared<Policy>(routing_table, Availability);
             }
@@ -172,7 +172,7 @@ namespace groute {
                 // Instead of pushing to GPU 0, we push tasks to the first available device,
                 // this is beneficial for the case where the first device is already utilized
                 // with a prior task.
-                routing_table[Endpoint::HostEndpoint()] = Endpoint::Range(ndevs); // For initial work from host
+                routing_table[Endpoint::HostEndpoint(0)] = Endpoint::Range(ndevs); // For initial work from host
 
                 return std::make_shared<Policy>(routing_table, Availability);
             }

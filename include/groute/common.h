@@ -120,18 +120,19 @@ namespace groute {
         bool IsHost() const { return m_identity <= Host && m_identity != Null; } // Any negative number but 'Null' can represent a Host endpoint
         bool IsNull() const { return m_identity == Null; }
 
-        static std::vector<Endpoint> Range(int count, identity_type from = 0)
+        static std::vector<Endpoint> Range(int count, identity_type from = 0, bool reverse = false)
         {
             std::vector<Endpoint> vec(count);
             for (int i = 0; i < count; i++) 
             {
-                vec[i] = from + i;
+                vec[i] = reverse ? from - i : from + i;
             }
 
             return std::move(vec);
         }
 
-        static Endpoint HostEndpoint(identity_type i = 0) { return Host*(i+1); } // Generates a proper Host endpoint  
+        static Endpoint HostEndpoint(int i) { return Host*(i+1); }  // Get the i'th Host endpoint (-1, -2, ...)
+        static Endpoint GPUEndpoint (int i) { return i; }           // Get the i'th GPU endpoint (0, 1, 2, ...)
     };
 
     typedef std::vector<Endpoint> EndpointList;

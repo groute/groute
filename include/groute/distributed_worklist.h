@@ -151,7 +151,7 @@ namespace groute {
                     }
 
                     if (flags & SF_Pass)
-                        // pass on to another device
+                        // pass on to another endpoint
                     {
                         int pass_leader = __ffs(pass_mask) - 1;
                         int thread_offset = __popc(pass_mask & ((1 << lane_id()) - 1));
@@ -175,7 +175,7 @@ namespace groute {
                     }
                     if (flags & SF_Pass)
                     {
-                        // belongs to another device
+                        // belongs to another endpoint
                         remote_work.append(work);
                     }
                 }
@@ -198,7 +198,7 @@ namespace groute {
     {
         virtual ~IDistributedWorklist() { }
 
-        virtual void ReportWork(int new_work, int performed_work, const char* caller, Endpoint dev) = 0;        
+        virtual void ReportWork(int new_work, int performed_work, const char* caller, Endpoint endpoint) = 0;        
         virtual void ReportWork(int work) = 0;
         virtual bool HasWork() const = 0;
 
@@ -235,7 +235,7 @@ namespace groute {
     class DistributedWorklistPeer : public IDistributedWorklistPeer<TLocal, TRemote>
     {
     protected:
-        int m_dev, m_ngpus;
+        Endpoint m_endpoint, m_ngpus;
 
     private:
         Context& m_context;
@@ -250,7 +250,7 @@ namespace groute {
 
         CircularWorklist<TRemote> 
             m_send_remote_output_worklist, // From local work (split-send)
-            m_pass_remote_output_worklist; // From previous device on the ring (split-receive), passing on  
+            m_pass_remote_output_worklist; // From previous endpoint on the ring (split-receive), passing on  
 
         std::thread m_receive_thread;
         std::thread m_send_thread;
@@ -313,7 +313,7 @@ namespace groute {
 #ifndef NDEBUG
             if (m_flags & DW_DebugPrint) // debug prints  
             {
-                printf("\n\n\tDevice: %d\nSplitReceive->Local work: ", m_dev);
+                printf("\n\n\tEndpoint: %d\nSplitReceive->Local work: ", (Endpoint::identity_type)m_endpoint);
                 local_work.PrintOffsetsDebug(stream);
                 printf("\nSplitReceive->Remote work: ");
                 remote_work.PrintOffsetsDebug(stream);
@@ -325,7 +325,7 @@ namespace groute {
             m_distributed_worklist.ReportWork(
                 (int)received_work.GetSegmentSize() - (int)m_filter_counter.GetCount(stream),
                 (int)received_work.GetSegmentSize(),
-                "Filter", m_dev
+                "Filter", m_endpoint
                 );
         }
 
@@ -359,7 +359,7 @@ namespace groute {
 #ifndef NDEBUG
             if (m_flags & DW_DebugPrint) // debug prints  
             {
-                printf("\n\n\tDevice: %d\nSplitSend->Local work: ", m_dev);
+                printf("\n\n\tEndpoint: %d\nSplitSend->Local work: ", (Endpoint::identity_type)m_endpoint);
                 local_work.PrintOffsetsDebug(stream);
                 printf("\nSplitSend->Remote work: ");
                 remote_work.PrintOffsetsDebug(stream);
@@ -371,8 +371,8 @@ namespace groute {
 
         void ReceiveLoop()
         {
-            m_context.SetDevice(m_dev);
-            Stream stream = m_context.CreateStream(m_dev, (m_flags & DW_HighPriorityReceive) ? SP_High : SP_Default);
+            m_context.SetDevice(m_endpoint);
+            Stream stream = m_context.CreateStream(m_endpoint, (m_flags & DW_HighPriorityReceive) ? SP_High : SP_Default);
 
             while (true)
             {
@@ -384,7 +384,7 @@ namespace groute {
                 seg.Wait(stream.cuda_stream);
                 SplitReceive(seg, m_local_input_worklist, m_pass_remote_output_worklist, stream);
 
-                Event split_ev = m_context.RecordEvent(m_dev, stream.cuda_stream);
+                Event split_ev = m_context.RecordEvent(m_endpoint, stream.cuda_stream);
 
                 m_link_in.ReleaseBuffer(seg, split_ev);
 
@@ -422,8 +422,8 @@ namespace groute {
 
         void SendLoop()
         {
-            m_context.SetDevice(m_dev);
-            Stream stream = m_context.CreateStream(m_dev);
+            m_context.SetDevice(m_endpoint);
+            Stream stream = m_context.CreateStream(m_endpoint);
 
             int source = 0;
 
@@ -501,12 +501,12 @@ namespace groute {
         DistributedWorklistPeer(
             Context& context, router::IRouter<TRemote>& router, 
             IDistributedWorklist& distributed_worklist, const SplitOps& split_ops, DistributedWorklistFlags flags,
-            Endpoint dev, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs) 
+            Endpoint endpoint, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs) 
             :
-            m_context(context), m_dev(dev), m_ngpus(ngpus), m_distributed_worklist(distributed_worklist), 
+            m_context(context), m_endpoint(endpoint), m_ngpus(ngpus), m_distributed_worklist(distributed_worklist), 
             m_split_ops(split_ops), m_flags(flags),
-            m_link_in(router, dev, max_exch_size, exch_buffs), 
-            m_link_out(dev, router)
+            m_link_in(router, endpoint, max_exch_size, exch_buffs), 
+            m_link_out(endpoint, router)
         {
             void* mem_buffer;
             size_t mem_size;
@@ -585,7 +585,7 @@ namespace groute {
             if (split_work.Empty()) return;
 
             SplitSend(split_work, m_local_input_worklist, m_send_remote_output_worklist, stream);
-            Event split_ev = m_context.RecordEvent(m_dev, stream.cuda_stream);
+            Event split_ev = m_context.RecordEvent(m_endpoint, stream.cuda_stream);
             SignalRemoteWork(split_ev);
         }
 
@@ -614,9 +614,9 @@ namespace groute {
         std::atomic<unsigned int> m_reported_work;
         std::vector<unsigned int> m_ctr;
     public:
-        unsigned int GetCurrentWorkCount(Endpoint dev)
+        unsigned int GetCurrentWorkCount(Endpoint endpoint)
         {
-            return m_ctr[(Endpoint::identity_type)dev + 1];
+            return m_ctr[(Endpoint::identity_type)endpoint + 1];
         }
         
     public:
@@ -647,12 +647,12 @@ namespace groute {
 
         template<typename SplitOps>
         std::unique_ptr< IDistributedWorklistPeer<TLocal, TRemote> > CreatePeer(
-            Endpoint dev, const SplitOps& split_ops, 
+            Endpoint endpoint, const SplitOps& split_ops, 
             size_t max_work_size, size_t max_exch_size, size_t exch_buffs, DistributedWorklistFlags flags = (DistributedWorklistFlags)(DW_WarpAppend | DW_HighPriorityReceive))
         {
-            m_context.SetDevice(dev);
+            m_context.SetDevice(endpoint);
             return groute::make_unique< DistributedWorklistPeer<TLocal, TRemote, SplitOps> >(
-                m_context, m_router, *this, split_ops, flags, dev, m_ngpus, max_work_size, max_exch_size, exch_buffs);
+                m_context, m_router, *this, split_ops, flags, endpoint, m_ngpus, max_work_size, max_exch_size, exch_buffs);
         }
 
         void ReportPeerTermination()
@@ -663,14 +663,14 @@ namespace groute {
             }
         }
 
-        void ReportWork(int new_work, int performed_work, const char* caller, Endpoint dev) override
+        void ReportWork(int new_work, int performed_work, const char* caller, Endpoint endpoint) override
         {
             int work = new_work - performed_work;
 
             if (false)
             {
                 m_reported_work += performed_work;
-                m_ctr[(Endpoint::identity_type)dev + 1] += performed_work;
+                m_ctr[(Endpoint::identity_type)endpoint + 1] += performed_work;
             }
             
             if (work == 0) return;

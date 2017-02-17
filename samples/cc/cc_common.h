@@ -54,7 +54,7 @@ namespace cc
     {
         const Context& context;
 
-        groute::Endpoint dev;
+        groute::Endpoint endpoint;
         dim3 block_dims;
         size_t compressed_size;
 
@@ -69,9 +69,9 @@ namespace cc
 
         Problem(
             const Context& context, 
-            const Partition& partition, groute::Endpoint dev, dim3 block_dims) :
+            const Partition& partition, groute::Endpoint endpoint, dim3 block_dims) :
             context(context), partition(partition), 
-            dev(dev), block_dims(block_dims), compressed_size(0)
+            endpoint(endpoint), block_dims(block_dims), compressed_size(0)
         {
             size_t parents_ss; // The parent segment size
             size_t parents_so; // The parent segment offset
@@ -81,7 +81,7 @@ namespace cc
 
             int* parents_ptr;
 
-            context.SetDevice(dev);
+            context.SetDevice(endpoint);
             GROUTE_CUDA_CHECK(cudaMalloc(&parents_ptr, parents_ss * sizeof(int)));
             GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&compute_stream, cudaStreamNonBlocking));
             GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
@@ -91,7 +91,7 @@ namespace cc
 
         ~Problem()
         {
-            context.SetDevice(dev);
+            context.SetDevice(endpoint);
             GROUTE_CUDA_CHECK(cudaFree(parents.GetSegmentPtr()));
             GROUTE_CUDA_CHECK(cudaStreamDestroy(compute_stream));
             GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
@@ -217,7 +217,7 @@ namespace cc
 
         groute::Event Record() const
         {
-            return context.RecordEvent(dev, compute_stream);
+            return context.RecordEvent(endpoint, compute_stream);
         }
 
         void Sync() const
@@ -246,7 +246,7 @@ namespace cc
 
         void Solve(const Configuration& configuration)
         {
-            context.SetDevice(problem.dev);
+            context.SetDevice(problem.endpoint);
 
             // Init
             problem.Init();

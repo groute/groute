@@ -406,12 +406,12 @@ namespace sssp {
                 }
 
                 // report the initial work
-                distributed_worklist.ReportHighPrioWork(1, 0, "Host", groute::Device::Host, true);
+                distributed_worklist.ReportHighPrioWork(1, 0, "Host", groute::Endpoint::HostEndpoint(0), true);
 
                 std::vector<remote_work_t> initial_work;
                 initial_work.push_back(remote_work_t(source_node, 0));
 
-                groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Device::Host);
+                groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint(0));
                 work_sender->Send(
                     groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
                 work_sender->Shutdown();

@@ -87,6 +87,24 @@
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
       <Filter>groute\internal</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\groute\communication.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\cta_work.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\fused_worker.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\groute.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

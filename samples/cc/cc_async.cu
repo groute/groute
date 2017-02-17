@@ -116,8 +116,8 @@ bool RunCCMAsyncAtomic(int ngpus)
         groute::router::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
         groute::router::Router<int> reduction_router(context, reduction_policy);
 
-        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint());
-        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint()); // TODO
+        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0));
+        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint(0)); // TODO
 
         IntervalRangeMarker iter_rng(context.nedges, "begin");
 

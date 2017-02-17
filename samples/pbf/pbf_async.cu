@@ -241,13 +241,13 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
 
     groute::Context ctx(ngpus);
 
-    auto gpu_work = [&](groute::Endpoint device, size_t maxout,
+    auto gpu_work = [&](groute::Endpoint endpoint, size_t maxout,
                         groute::router::Router<T>& scatter,
                         groute::router::Router<T>& gather,
                         groute::internal::Barrier& barrier) {
-        groute::Stream stm(ctx.GetPhysicalDevice(device));
-        groute::Link<T> sock_in(scatter, device, maxout, FLAGS_pipeline);
-        groute::Link<T> sock_out(device, gather, maxout, FLAGS_pipeline);
+        groute::Stream stm(ctx.GetPhysicalDevice(endpoint));
+        groute::Link<T> sock_in(scatter, endpoint, maxout, FLAGS_pipeline);
+        groute::Link<T> sock_out(endpoint, gather, maxout, FLAGS_pipeline);
 
         dim3 block_dims(256);
 
@@ -290,7 +290,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
                                                                   outseg.GetSegmentPtr(), 
                                                                   d_outsz);
             GetItemCount<<<1,1,0,stm.cuda_stream>>>(d_outsz, d_h_outsz);
-            groute::Event ev = ctx.RecordEvent(device, stm.cuda_stream);
+            groute::Event ev = ctx.RecordEvent(endpoint, stm.cuda_stream);
 
             ev.Sync(); // To obtain outsz
 
@@ -307,7 +307,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         range.Stop();
         barrier.Sync();
 
-        printf("GPU%d: inputs: %llu, outputs: %llu\n", device, total_input, total_processed);
+        printf("GPU%d: inputs: %llu, outputs: %llu\n", endpoint, total_input, total_processed);
 
         cudaFree(d_outsz);
         cudaFreeHost(outsz);
@@ -315,13 +315,13 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
     ////////////////////////////////////////
 
     groute::router::Router<T> scatter(ctx, 
-        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
+        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
     groute::router::Router<T> gather(ctx,
-        groute::router::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(), groute::Endpoint::Range(ngpus)));
+        groute::router::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
     size_t chunksize = FLAGS_chunksize;
 
-    groute::Link<T> dist(groute::Endpoint::HostEndpoint(), scatter, chunksize, 1);
-    groute::Link<T> collect(gather, groute::Endpoint::HostEndpoint(), chunksize, 2 * ngpus);
+    groute::Link<T> dist(groute::Endpoint::HostEndpoint(0), scatter, chunksize, 1);
+    groute::Link<T> collect(gather, groute::Endpoint::HostEndpoint(0), chunksize, 2 * ngpus);
 
     groute::internal::Barrier bar(ngpus + 1);
 

@@ -94,6 +94,15 @@
     <ClInclude Include="..\..\include\groute\fused_worker.h">
       <Filter>groute</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\groute\communication.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\groute.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

@@ -578,7 +578,7 @@ namespace pr
 
         void Solve(
             groute::Context& context,
-            groute::Endpoint dev,
+            groute::Endpoint endpoint,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist,
             groute::IDistributedWorklistPeer<local_work_t, remote_work_t>* worklist_peer,
             groute::Stream& stream)
@@ -594,7 +594,7 @@ namespace pr
             distributed_worklist.ReportWork(
                 (int)seg1.GetSegmentSize(),
                 (int)m_problem.m_graph.owned_nnodes(),
-                "PR", dev
+                "PR", endpoint
                 );
 
             worklist_peer->PerformSplitSend(seg1, stream); // call split-send
@@ -614,7 +614,7 @@ namespace pr
             distributed_worklist.ReportWork(
                 (int)seg2.GetSegmentSize(),
                 0,
-                "PR", dev
+                "PR", endpoint
                 );
 
             worklist_peer->PerformSplitSend(seg2, stream); // call split-send
@@ -651,7 +651,7 @@ namespace pr
                 distributed_worklist.ReportWork(
                     (int)new_work,
                     (int)performed_work,
-                    "PR", dev
+                    "PR", endpoint
                     );
 
                 worklist_peer->PerformSplitSend(output_seg, stream); // call split-send 
@@ -660,13 +660,13 @@ namespace pr
                     //distributed_worklist.ReportPeerTermination();
                     //terminated = true;
                     //
-                    //printf("Device %d is terminating after %d iterations (max: %d * %d)\n\n", dev, iteration-1, FLAGS_max_pr_iterations, async_iteration_factor);
+                    //printf("Endpoint %d is terminating after %d iterations (max: %d * %d)\n\n", dev, iteration-1, FLAGS_max_pr_iterations, async_iteration_factor);
                     //continue; // Go on until all devices report termination, and router shutsdown  
                 }
             }
 
             if (FLAGS_verbose) {
-                printf("Device %d is exiting after %d iterations (max: %d * %d)\n\n", dev, iteration, FLAGS_max_pr_iterations, async_iteration_factor);
+                printf("Endpoint %d is exiting after %d iterations (max: %d * %d)\n\n", (groute::Endpoint::identity_type)endpoint, iteration, FLAGS_max_pr_iterations, async_iteration_factor);
             }
         }
     };
