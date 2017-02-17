@@ -242,8 +242,8 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
     groute::Context ctx(ngpus);
 
     auto gpu_work = [&](groute::Endpoint endpoint, size_t maxout,
-                        groute::router::Router<T>& scatter,
-                        groute::router::Router<T>& gather,
+                        groute::Router<T>& scatter,
+                        groute::Router<T>& gather,
                         groute::internal::Barrier& barrier) {
         groute::Stream stm(ctx.GetPhysicalDevice(endpoint));
         groute::Link<T> link_in(scatter, endpoint, maxout, FLAGS_pipeline);
@@ -273,7 +273,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         // Work thread
         while (true) 
         {
-            groute::router::PendingSegment<T> seg = link_in.Receive().get();
+            groute::PendingSegment<T> seg = link_in.Receive().get();
             if (seg.Empty()) break;
             groute::Segment<T> outseg = link_out.GetSendBuffer();
 
@@ -314,10 +314,10 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
     };
     ////////////////////////////////////////
 
-    groute::router::Router<T> scatter(ctx, 
-        groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
-    groute::router::Router<T> gather(ctx,
-        groute::router::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
+    groute::Router<T> scatter(ctx, 
+        groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
+    groute::Router<T> gather(ctx,
+        groute::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
     size_t chunksize = FLAGS_chunksize;
 
     groute::Link<T> dist(groute::Endpoint::HostEndpoint(0), scatter, chunksize, 1);
@@ -362,7 +362,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         // Aggregate segments one by one
         while (true)
         {
-            groute::router::PendingSegment<T> seg = collect.Receive().get();
+            groute::PendingSegment<T> seg = collect.Receive().get();
             if (seg.Empty()) break;
 
             seg.Sync();

@@ -48,11 +48,7 @@
 
 
 namespace groute {
-    
-    template <typename T>
-    class Link;
-
-    namespace router {
+    namespace internal {
 
         /**
         * @brief Represents a segment receive operation from a single source to a single destination
@@ -172,7 +168,7 @@ namespace groute {
                 std::shared_ptr<AggregatedEventPromise> aggregated_event,
                 Endpoint src_endpoint, const Segment<T>& src_segment, const Event& src_ready_event) :
                 m_aggregated_event(aggregated_event),
-                m_src_endpoint(src_endpoint), m_src_segment(src_segment), 
+                m_src_endpoint(src_endpoint), m_src_segment(src_segment),
                 m_src_ready_event(src_ready_event), m_pos(0), m_progress(0)
             {
                 m_ev_group = std::make_shared<EventGroup>();
@@ -231,77 +227,81 @@ namespace groute {
             }
         };
 
+    }
+    
+    template <typename T>
+    class Link;
 
-        enum RouteStrategy
+    enum RouteStrategy
         {
             Availability, Priority, Broadcast,
         };
-
-        struct Route
+    
+    struct Route
+    {
+        EndpointList dst_endpoints; // order matters if strategy is Priority  
+        RouteStrategy strategy;
+    
+        Route(RouteStrategy strategy = Availability) : strategy(strategy) { }
+    
+        Route(const std::vector<Endpoint>& dst_endpoints, RouteStrategy strategy = Availability) :
+            dst_endpoints(dst_endpoints), strategy(strategy)
         {
-            EndpointList dst_endpoints; // order matters if strategy is Priority  
-            RouteStrategy strategy;
-
-            Route(RouteStrategy strategy = Availability) : strategy(strategy) { }
-
-            Route(const std::vector<Endpoint>& dst_endpoints, RouteStrategy strategy = Availability) :
-                dst_endpoints(dst_endpoints), strategy(strategy)
-            {
-            }
-        };
-
-        struct IPolicy
-        {
-            virtual ~IPolicy() { }
-
-            virtual RoutingTable GetRoutingTable() = 0; // TODO: we can avoid this
-            virtual Route GetRoute(Endpoint src, void* message_metadata) = 0;
-        };
-
-        struct IRouter // an untyped base interface for the Router
+        }
+    };
+    
+    struct IPolicy
+    {
+        virtual ~IPolicy() { }
+    
+        virtual RoutingTable GetRoutingTable() = 0; // TODO: we can avoid this
+        virtual Route GetRoute(Endpoint src, void* message_metadata) = 0;
+    };
+    
+    struct IRouter // an untyped base interface for the Router
         {
             virtual ~IRouter() { }
             virtual void Shutdown() = 0;
         };
-
-        /**
-        * @brief The focal point between multiple senders and receivers.
-        *        The router routs data from a sender into one/many receivers
-        */
-        template <typename T>
-        class Router : public IRouter
+    
+    /**
+    * @brief The focal point between multiple senders and receivers.
+    *        The router routs data from a sender into one/many receivers
+    */
+    template <typename T>
+    class Router : public IRouter
+    {
+        friend class Link < T > ;
+    
+        Context& m_context;
+    
+        std::shared_ptr<IPolicy> m_policy;
+        RoutingTable m_possible_routes;
+    
+        class InactiveReceiver;
+        class InactiveSender;
+        class Receiver;
+        class Sender;
+    
+        std::map<Endpoint, std::unique_ptr<Receiver> > m_receivers;
+        std::map<Endpoint, std::unique_ptr<Sender> > m_senders;
+    
+        std::map<Endpoint, std::unique_ptr<InactiveReceiver> > m_inactive_receivers;
+        std::map<Endpoint, std::unique_ptr<InactiveSender> > m_inactive_senders;
+        std::mutex m_inactive_mutex;
+    
+        class InactiveReceiver : public IReceiver < T >
         {
-            friend class Link < T > ;
-
-            Context& m_context;
-
-            std::shared_ptr<IPolicy> m_policy;
-            RoutingTable m_possible_routes;
-
-            class InactiveReceiver;
-            class InactiveSender;
-            class Receiver;
-            class Sender;
-
-            std::map<Endpoint, std::unique_ptr<Receiver> > m_receivers;
-            std::map<Endpoint, std::unique_ptr<Sender> > m_senders;
-
-            std::map<Endpoint, std::unique_ptr<InactiveReceiver> > m_inactive_receivers;
-            std::map<Endpoint, std::unique_ptr<InactiveSender> > m_inactive_senders;
-            std::mutex m_inactive_mutex;
-
-            class InactiveReceiver : public IReceiver < T >
+        public:
+            std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
             {
-            public:
-                std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
-                {
-                    return groute::completed_future(PendingSegment<T>());
-                }
-
-                bool Active() override { return false; }
-            };
-
-            class InactiveSender : public ISender < T >
+                return groute::completed_future(PendingSegment<T>());
+            }
+    
+            bool Active() override { return false; }
+        };
+    
+        class InactiveSender : public ISender < T >
             {
             public:
                 InactiveSender()  { }
@@ -319,122 +319,122 @@ namespace groute {
                 Segment<T> GetSendBuffer() override { return Segment<T>();  }
                 void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) override {}
             };
-
-            class Receiver : public IReceiver < T >
+    
+        class Receiver : public IReceiver < T >
+        {
+        private:
+            Router<T>& m_router;
+            const Endpoint m_endpoint;
+    
+            std::set<Endpoint> m_possible_senders;
+    
+            std::mutex m_mutex; 
+    
+            std::deque < std::shared_ptr< internal::SendOperation<T> > > m_send_queue;
+            std::deque < std::shared_ptr< internal::ReceiveOperation<T> > > m_receive_queue;
+    
+        public:
+            Receiver(Router<T>& router, Endpoint endpoint) : m_router(router), m_endpoint(endpoint) { }
+            ~Receiver() { }
+    
+            std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
             {
-            private:
-                Router<T>& m_router;
-                const Endpoint m_endpoint;
-
-                std::set<Endpoint> m_possible_senders;
-
-                std::mutex m_mutex; 
-
-                std::deque < std::shared_ptr< SendOperation<T> > > m_send_queue;
-                std::deque < std::shared_ptr< ReceiveOperation<T> > > m_receive_queue;
-
-            public:
-                Receiver(Router<T>& router, Endpoint endpoint) : m_router(router), m_endpoint(endpoint) { }
-                ~Receiver() { }
-
-                std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
+                auto receive_op =
+                    std::make_shared< internal::ReceiveOperation<T> >(m_endpoint, dst_buffer, ready_event);
+    
+                QueueReceiveOp(receive_op);
+                if (!Assign())
                 {
-                    auto receive_op =
-                        std::make_shared< ReceiveOperation<T> >(m_endpoint, dst_buffer, ready_event);
-
-                    QueueReceiveOp(receive_op);
-                    if (!Assign())
-                    {
-                        CheckPossibleSenders();
-                    }
-
-                    return receive_op->GetFuture();
-                }
-
-                bool Active() override
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    return (!m_send_queue.empty() || !m_possible_senders.empty());
-                }
-
-                void QueueSendOp(const std::shared_ptr< SendOperation<T> >& send_op)
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    m_send_queue.push_back(send_op);
-                }
-
-                void QueueReceiveOp(const std::shared_ptr< ReceiveOperation<T> >& receive_op)
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    m_receive_queue.push_back(receive_op);
-                }
-
-                /*
-                * @brief Tries to perform a single 'assignment' between a receive operation and a send operation (both at queues front)
-                */
-                bool Assign()
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    if (m_send_queue.empty() || m_receive_queue.empty()) return false;
-
-                    auto send_op = m_send_queue.front();
-                    auto receive_op = m_receive_queue.front();
-
-                    while (true)
-                    {
-                        if (send_op->AssignReceiveOperation(receive_op))
-                        {
-                            m_router.QueueMemcpyWork(send_op, receive_op);
-                            m_receive_queue.pop_front();
-                            return true;
-                        }
-
-                        m_send_queue.pop_front();
-                        if (m_send_queue.empty()) return false;
-
-                        send_op = m_send_queue.front();
-                    }
-                }
-
-                void CheckPossibleSenders()
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    if (m_send_queue.empty() && m_possible_senders.empty())
-                    {
-                        for (auto& receive_op : m_receive_queue)
-                        {
-                            receive_op->Cancel();
-                        }
-                        m_receive_queue.clear();
-                    }
-                }
-
-                void AddPossibleSender(Endpoint endpoint)
-                {
-                    std::lock_guard<std::mutex> guard(m_mutex);
-                    m_possible_senders.insert(endpoint);
-                }
-
-                void RemovePossibleSender(Endpoint endpoint)
-                {
-                    {
-                        std::lock_guard<std::mutex> guard(m_mutex);
-                        m_possible_senders.erase(endpoint);
-                    }
                     CheckPossibleSenders();
                 }
-
-                void ClearPossibleSenders()
+    
+                return receive_op->GetFuture();
+            }
+    
+            bool Active() override
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                return (!m_send_queue.empty() || !m_possible_senders.empty());
+            }
+    
+            void QueueSendOp(const std::shared_ptr< internal::SendOperation<T> >& send_op)
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                m_send_queue.push_back(send_op);
+            }
+    
+            void QueueReceiveOp(const std::shared_ptr< internal::ReceiveOperation<T> >& receive_op)
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                m_receive_queue.push_back(receive_op);
+            }
+    
+            /*
+            * @brief Tries to perform a single 'assignment' between a receive operation and a send operation (both at queues front)
+            */
+            bool Assign()
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (m_send_queue.empty() || m_receive_queue.empty()) return false;
+    
+                auto send_op = m_send_queue.front();
+                auto receive_op = m_receive_queue.front();
+    
+                while (true)
                 {
+                    if (send_op->AssignReceiveOperation(receive_op))
                     {
-                        std::lock_guard<std::mutex> guard(m_mutex);
-                        m_possible_senders.clear();
+                        m_router.QueueMemcpyWork(send_op, receive_op);
+                        m_receive_queue.pop_front();
+                        return true;
                     }
-                    CheckPossibleSenders();
+    
+                    m_send_queue.pop_front();
+                    if (m_send_queue.empty()) return false;
+    
+                    send_op = m_send_queue.front();
                 }
-            };
-
-            struct SegmentPool
+            }
+    
+            void CheckPossibleSenders()
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                if (m_send_queue.empty() && m_possible_senders.empty())
+                {
+                    for (auto& receive_op : m_receive_queue)
+                    {
+                        receive_op->Cancel();
+                    }
+                    m_receive_queue.clear();
+                }
+            }
+    
+            void AddPossibleSender(Endpoint endpoint)
+            {
+                std::lock_guard<std::mutex> guard(m_mutex);
+                m_possible_senders.insert(endpoint);
+            }
+    
+            void RemovePossibleSender(Endpoint endpoint)
+            {
+                {
+                    std::lock_guard<std::mutex> guard(m_mutex);
+                    m_possible_senders.erase(endpoint);
+                }
+                CheckPossibleSenders();
+            }
+    
+            void ClearPossibleSenders()
+            {
+                {
+                    std::lock_guard<std::mutex> guard(m_mutex);
+                    m_possible_senders.clear();
+                }
+                CheckPossibleSenders();
+            }
+        };
+    
+        struct SegmentPool
             {
                 Endpoint m_endpoint;
                 std::deque<T*> m_buffers;
@@ -522,182 +522,182 @@ namespace groute {
                     ReleaseBuffer(buff);
                 }
             };
-
-            class Sender : public ISender < T >
+    
+        class Sender : public ISender < T >
+        {
+        private:
+            Router<T>& m_router;
+            const Endpoint m_endpoint;
+            bool m_shutdown;
+    
+            SegmentPool m_segpool;
+    
+        public:
+            Sender(Router<T>& router, Endpoint endpoint, int chunksize = 0, int numchunks = 0) : 
+                m_router(router), m_endpoint(endpoint), m_shutdown(false), m_segpool(router.m_context, endpoint, chunksize, numchunks) { }
+            ~Sender() { }
+    
+            std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
             {
-            private:
-                Router<T>& m_router;
-                const Endpoint m_endpoint;
-                bool m_shutdown;
-
-                SegmentPool m_segpool;
-
-            public:
-                Sender(Router<T>& router, Endpoint endpoint, int chunksize = 0, int numchunks = 0) : 
-                    m_router(router), m_endpoint(endpoint), m_shutdown(false), m_segpool(router.m_context, endpoint, chunksize, numchunks) { }
-                ~Sender() { }
-
-                std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
+                if (m_shutdown)
                 {
-                    if (m_shutdown)
-                    {
-                        //throw std::exception();
-                        return groute::completed_future(Event()); // Fail gracefully. TODO: should be configurable  
+                    //throw std::exception();
+                    return groute::completed_future(Event()); // Fail gracefully. TODO: should be configurable  
+                }
+    
+                if (segment.Empty()) return groute::completed_future(Event());
+    
+                return QueueSendOps(segment, ready_event)
+                    ->GetFuture();
+            }
+    
+            void Shutdown() override
+            {
+                m_shutdown = true;
+    
+                if (m_router.m_possible_routes.find(m_endpoint) == m_router.m_possible_routes.end()) return;
+    
+                for (auto dst_endpoint : m_router.m_possible_routes.at(m_endpoint))
+                {
+                    m_router.m_receivers.at(dst_endpoint)
+                        ->RemovePossibleSender(m_endpoint);
+                }
+            }
+    
+            Segment<T> GetSendBuffer() override 
+            { 
+                return m_segpool.GetBuffer();
+            }
+    
+            void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) override 
+            {
+                int physical_dev = m_router.m_context.GetPhysicalDevice(m_endpoint);
+    
+                std::thread asyncrelease([](SegmentPool& segpool, int pd, Segment<T> seg, Event ev) {
+                    segpool.ReleaseBufferEvent(seg.GetSegmentPtr(), pd, ev);
+                }, std::ref(m_segpool), physical_dev, segment, ready_event);
+                asyncrelease.detach();
+            }
+    
+            void AssertRoute(Endpoint src_endpoint, const Route& route) const
+            {
+                for (Endpoint dst_endpoint : route.dst_endpoints)
+                {
+                    if (m_router.m_possible_routes.find(src_endpoint) == m_router.m_possible_routes.end()) {
+                        printf(
+                            "\n\nWarning: %d was not configured to be a possible route source by the current policy, please fix the policy implementation\n\n", 
+                            (Endpoint::identity_type)src_endpoint);
+                        exit(1);
                     }
-
-                    if (segment.Empty()) return groute::completed_future(Event());
-
-                    return QueueSendOps(segment, ready_event)
-                        ->GetFuture();
-                }
-
-                void Shutdown() override
-                {
-                    m_shutdown = true;
-
-                    if (m_router.m_possible_routes.find(m_endpoint) == m_router.m_possible_routes.end()) return;
-
-                    for (auto dst_endpoint : m_router.m_possible_routes.at(m_endpoint))
+    
+                    bool possible = false;
+                    for (Endpoint possible_dst_endpoint : m_router.m_possible_routes.at(src_endpoint))
                     {
-                        m_router.m_receivers.at(dst_endpoint)
-                            ->RemovePossibleSender(m_endpoint);
-                    }
-                }
-
-                Segment<T> GetSendBuffer() override 
-                { 
-                    return m_segpool.GetBuffer();
-                }
-
-                void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) override 
-                {
-                    int physical_dev = m_router.m_context.GetPhysicalDevice(m_endpoint);
-
-                    std::thread asyncrelease([](SegmentPool& segpool, int pd, Segment<T> seg, Event ev) {
-                        segpool.ReleaseBufferEvent(seg.GetSegmentPtr(), pd, ev);
-                    }, std::ref(m_segpool), physical_dev, segment, ready_event);
-                    asyncrelease.detach();
-                }
-
-                void AssertRoute(Endpoint src_endpoint, const Route& route) const
-                {
-                    for (Endpoint dst_endpoint : route.dst_endpoints)
-                    {
-                        if (m_router.m_possible_routes.find(src_endpoint) == m_router.m_possible_routes.end()) {
-                            printf(
-                                "\n\nWarning: %d was not configured to be a possible route source by the current policy, please fix the policy implementation\n\n", 
-                                (Endpoint::identity_type)src_endpoint);
-                            exit(1);
-                        }
-
-                        bool possible = false;
-                        for (Endpoint possible_dst_endpoint : m_router.m_possible_routes.at(src_endpoint))
+                        if (possible_dst_endpoint == dst_endpoint)
                         {
-                            if (possible_dst_endpoint == dst_endpoint)
-                            {
-                                possible = true;
-                                break;
-                            }
-                        }
-
-                        if (!possible)
-                        {
-                            printf(
-                                "\n\nWarning: (%d -> %d) was not configured to be a possible route by the current policy, please fix the policy implementation\n\n", 
-                                (Endpoint::identity_type)src_endpoint, (Endpoint::identity_type)dst_endpoint);
-                            exit(1);
+                            possible = true;
+                            break;
                         }
                     }
+    
+                    if (!possible)
+                    {
+                        printf(
+                            "\n\nWarning: (%d -> %d) was not configured to be a possible route by the current policy, please fix the policy implementation\n\n", 
+                            (Endpoint::identity_type)src_endpoint, (Endpoint::identity_type)dst_endpoint);
+                        exit(1);
+                    }
                 }
-
-                std::shared_ptr<AggregatedEventPromise> QueueSendOps(const Segment<T>& segment, const Event& ready_event)
-                {
-                    auto aggregated_event = std::make_shared<AggregatedEventPromise>();  
-
-                    Route route = m_router.m_policy->GetRoute(m_endpoint, segment.metadata);
+            }
+    
+            std::shared_ptr<AggregatedEventPromise> QueueSendOps(const Segment<T>& segment, const Event& ready_event)
+            {
+                auto aggregated_event = std::make_shared<AggregatedEventPromise>();  
+    
+                Route route = m_router.m_policy->GetRoute(m_endpoint, segment.metadata);
 #ifndef NDEBUG
-                    AssertRoute(m_endpoint, route);
+                AssertRoute(m_endpoint, route);
 #endif
-                    switch (route.strategy)
-                    {
-                    case Availability:
-                        aggregated_event->SetReportersCount(1);
-                        AvailabilityMultiplexing(segment, route, ready_event, aggregated_event);
-                        break;
-
-                    case Priority:
-                        aggregated_event->SetReportersCount(1);
-                        PriorityMultiplexing(segment, route, ready_event, aggregated_event);
-                        break;
-
-                    case Broadcast:
-                        aggregated_event->SetReportersCount((int)route.dst_endpoints.size());
-                        BroadcastMultiplexing(segment, route, ready_event, aggregated_event);
-                        break;
-                    }
-
-                    return aggregated_event;
-                }
-
-                // TODO: Refactor Multiplexer object
-
-                void AvailabilityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+                switch (route.strategy)
                 {
-                    auto send_op = std::make_shared< SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
-
+                case Availability:
+                    aggregated_event->SetReportersCount(1);
+                    AvailabilityMultiplexing(segment, route, ready_event, aggregated_event);
+                    break;
+    
+                case Priority:
+                    aggregated_event->SetReportersCount(1);
+                    PriorityMultiplexing(segment, route, ready_event, aggregated_event);
+                    break;
+    
+                case Broadcast:
+                    aggregated_event->SetReportersCount((int)route.dst_endpoints.size());
+                    BroadcastMultiplexing(segment, route, ready_event, aggregated_event);
+                    break;
+                }
+    
+                return aggregated_event;
+            }
+    
+            // TODO: Refactor Multiplexer object
+    
+            void AvailabilityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+            {
+                auto send_op = std::make_shared< internal::SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
+    
+                for (auto dst_endpoint : route.dst_endpoints)
+                {
+                    m_router.m_receivers.at(dst_endpoint)
+                        ->QueueSendOp(send_op);
+                }
+    
+                bool assigning = true;
+                while (assigning)
+                {
+                    assigning = false;
                     for (auto dst_endpoint : route.dst_endpoints)
                     {
-                        m_router.m_receivers.at(dst_endpoint)
-                            ->QueueSendOp(send_op);
-                    }
-
-                    bool assigning = true;
-                    while (assigning)
-                    {
-                        assigning = false;
-                        for (auto dst_endpoint : route.dst_endpoints)
+                        if (m_router.m_receivers.at(dst_endpoint) // go on at rounds, give an equal chance to all receivers  
+                            ->Assign())
                         {
-                            if (m_router.m_receivers.at(dst_endpoint) // go on at rounds, give an equal chance to all receivers  
-                                ->Assign())
-                            {
-                                assigning = true;
-                            }
+                            assigning = true;
                         }
                     }
                 }
-
-                void PriorityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+            }
+    
+            void PriorityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+            {
+                auto send_op = std::make_shared< internal::SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
+    
+                for (auto dst_endpoint : route.dst_endpoints) // go over receivers by priority  
                 {
-                    auto send_op = std::make_shared< SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
-
-                    for (auto dst_endpoint : route.dst_endpoints) // go over receivers by priority  
-                    {
-                        m_router.m_receivers.at(dst_endpoint)
-                            ->QueueSendOp(send_op);
-
-                        // let the prioritized receiver occupy as much as he can from the send_op  
-                        while (m_router.m_receivers.at(dst_endpoint)
-                            ->Assign());
-                    }
+                    m_router.m_receivers.at(dst_endpoint)
+                        ->QueueSendOp(send_op);
+    
+                    // let the prioritized receiver occupy as much as he can from the send_op  
+                    while (m_router.m_receivers.at(dst_endpoint)
+                        ->Assign());
                 }
-
-                void BroadcastMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+            }
+    
+            void BroadcastMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& aggregated_event)
+            {
+                for (auto dst_endpoint : route.dst_endpoints)
                 {
-                    for (auto dst_endpoint : route.dst_endpoints)
-                    {
-                        // create a send_op per receiver (broadcasting)  
-                        auto send_op = std::make_shared< SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
-
-                        m_router.m_receivers.at(dst_endpoint)
-                            ->QueueSendOp(send_op);
-
-                        while (m_router.m_receivers.at(dst_endpoint)
-                            ->Assign());
-                    }
+                    // create a send_op per receiver (broadcasting)  
+                    auto send_op = std::make_shared< internal::SendOperation<T> >(aggregated_event, m_endpoint, segment, ready_event);
+    
+                    m_router.m_receivers.at(dst_endpoint)
+                        ->QueueSendOp(send_op);
+    
+                    while (m_router.m_receivers.at(dst_endpoint)
+                        ->Assign());
                 }
-            };
-
-            void QueueMemcpyWork(std::shared_ptr< SendOperation<T> > send_op, std::shared_ptr< ReceiveOperation<T> > receive_op)
+            }
+        };
+    
+        void QueueMemcpyWork(std::shared_ptr< internal::SendOperation<T> > send_op, std::shared_ptr< internal::ReceiveOperation<T> > receive_op)
             {
                 m_context.QueueMemcpyWork(
                     receive_op->GetSrcEndpoint(), receive_op->GetSrcSegment().GetSegmentPtr(),
@@ -711,55 +711,55 @@ namespace groute {
                 }
                 );
             }
-
-        public:
-            Router(Context& context, const std::shared_ptr<IPolicy>& policy) :
-                m_context(context), m_policy(policy), m_possible_routes(policy->GetRoutingTable())
+    
+    public:
+        Router(Context& context, const std::shared_ptr<IPolicy>& policy) :
+            m_context(context), m_policy(policy), m_possible_routes(policy->GetRoutingTable())
+        {
+            context.RequireMemcpyLanes(m_possible_routes);
+    
+            std::set<Endpoint> dst_endpoints;
+    
+            for (auto& p : m_possible_routes)
             {
-                context.RequireMemcpyLanes(m_possible_routes);
-
-                std::set<Endpoint> dst_endpoints;
-
-                for (auto& p : m_possible_routes)
+                Endpoint src_endpoint = p.first;
+                m_senders[src_endpoint] = groute::make_unique<Sender>(*this, src_endpoint);
+    
+                // add all dst endpoints to the set
+                dst_endpoints.insert(std::begin(p.second), std::end(p.second));
+            }
+    
+            // create a receiver for each dst endpoint
+            for (auto dst_endpoint : dst_endpoints)
+            {
+                m_receivers[dst_endpoint] = groute::make_unique<Receiver>(*this, dst_endpoint);
+            }
+    
+            for (auto& p : m_possible_routes)
+            {
+                Endpoint src_endpoint = p.first;
+                for (auto dst_endpoint : p.second)
                 {
-                    Endpoint src_endpoint = p.first;
-                    m_senders[src_endpoint] = groute::make_unique<Sender>(*this, src_endpoint);
-
-                    // add all dst endpoints to the set
-                    dst_endpoints.insert(std::begin(p.second), std::end(p.second));
-                }
-
-                // create a receiver for each dst endpoint
-                for (auto dst_endpoint : dst_endpoints)
-                {
-                    m_receivers[dst_endpoint] = groute::make_unique<Receiver>(*this, dst_endpoint);
-                }
-
-                for (auto& p : m_possible_routes)
-                {
-                    Endpoint src_endpoint = p.first;
-                    for (auto dst_endpoint : p.second)
-                    {
-                        m_receivers[dst_endpoint]->AddPossibleSender(src_endpoint);
-                    }
+                    m_receivers[dst_endpoint]->AddPossibleSender(src_endpoint);
                 }
             }
-
-            void Shutdown() override
+        }
+    
+        void Shutdown() override
+        {
+            for (auto& p : m_senders)
             {
-                for (auto& p : m_senders)
-                {
-                    p.second->Shutdown();
-                }
+                p.second->Shutdown();
             }
-
-        private:
-
-            //
-            // Internal router API, used by Link
-            //
-
-            ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0)
+        }
+    
+    private:
+    
+        //
+        // Internal router API, used by Link
+        //
+    
+        ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0)
             {
                 if (m_senders.find(endpoint) == m_senders.end())
                     // no active sender, this means this endpoint was not registered as a sender by the policy
@@ -780,30 +780,29 @@ namespace groute {
 
                 return m_senders.at(endpoint).get();
             }
-
-            IReceiver<T>* GetReceiver(Endpoint endpoint) 
+    
+        IReceiver<T>* GetReceiver(Endpoint endpoint) 
+        {
+            if (m_receivers.find(endpoint) == m_receivers.end())
+                // no active receiver, this means this endpoint was not registered as a receiver by the policy
+                // just create an inactive one
             {
-                if (m_receivers.find(endpoint) == m_receivers.end())
-                    // no active receiver, this means this endpoint was not registered as a receiver by the policy
-                    // just create an inactive one
+                std::lock_guard<std::mutex> guard(m_inactive_mutex);
+                if (m_inactive_receivers.find(endpoint) == m_inactive_receivers.end())
                 {
-                    std::lock_guard<std::mutex> guard(m_inactive_mutex);
-                    if (m_inactive_receivers.find(endpoint) == m_inactive_receivers.end())
-                    {
-                        m_inactive_receivers[endpoint] = groute::make_unique<InactiveReceiver>();
-                    }
-                    return m_inactive_receivers.at(endpoint).get();
+                    m_inactive_receivers[endpoint] = groute::make_unique<InactiveReceiver>();
                 }
-
-                return m_receivers.at(endpoint).get();
+                return m_inactive_receivers.at(endpoint).get();
             }
-
-            std::unique_ptr< IPipelinedReceiver<T> > CreatePipelinedReceiver(Endpoint endpoint, size_t chunk_size, size_t num_buffers)
-            {
-                return groute::make_unique<PipelinedReceiver<T>>(m_context, GetReceiver(endpoint), endpoint, chunk_size, num_buffers);
-            }
-        };
-    }
+    
+            return m_receivers.at(endpoint).get();
+        }
+    
+        std::unique_ptr< IPipelinedReceiver<T> > CreatePipelinedReceiver(Endpoint endpoint, size_t chunk_size, size_t num_buffers)
+        {
+            return groute::make_unique<PipelinedReceiver<T>>(m_context, GetReceiver(endpoint), endpoint, chunk_size, num_buffers);
+        }
+    };
 }
 
 #endif // __GROUTE_ROUTER_H

@@ -106,7 +106,7 @@ namespace cc
         }
 
         template<bool R1 = false>
-        void Work(const groute::router::PendingSegment<Edge>& edge_seg)
+        void Work(const groute::PendingSegment<Edge>& edge_seg)
         {
             dim3 grid_dims(round_up(edge_seg.GetSegmentSize(), block_dims.x), 1, 1);
 
@@ -121,7 +121,7 @@ namespace cc
             compressed_size = 0;
         }
 
-        void WorkAtomic(const groute::router::PendingSegment<Edge>& edge_seg)
+        void WorkAtomic(const groute::PendingSegment<Edge>& edge_seg)
         {
             dim3 grid_dims(round_up(edge_seg.GetSegmentSize(), block_dims.x), 1, 1);
             
@@ -136,7 +136,7 @@ namespace cc
             compressed_size = 0;
         }
 
-        void Merge(const groute::router::PendingSegment<int>& merge_seg)
+        void Merge(const groute::PendingSegment<int>& merge_seg)
         {
             assert(merge_seg.GetSegmentOffset() >= parents.GetSegmentOffset());
             assert(merge_seg.GetSegmentOffset() - parents.GetSegmentOffset() + 
@@ -186,7 +186,7 @@ namespace cc
             compressed_size = size; // keep the compress size 
         }
 
-        void Compress(const groute::router::PendingSegment<int>& merged_seg)
+        void Compress(const groute::PendingSegment<int>& merged_seg)
         {
             // makes the decision what part to compress after a merge  
             // compresses from begining of local parents and up to covering the merged segment  
@@ -254,8 +254,8 @@ namespace cc
             auto input_fut = edges_in.Receive();
             auto reduce_fut = reduction_in.Receive();
 
-            groute::router::PendingSegment<int> merge_seg;
-            groute::router::PendingSegment<Edge> input_seg;
+            groute::PendingSegment<int> merge_seg;
+            groute::PendingSegment<Edge> input_seg;
 
             for (int i = 0;; ++i)
             {

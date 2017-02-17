@@ -254,8 +254,8 @@ namespace graphs {
                     ? max((size_t)(context.host_graph.nnodes * FLAGS_pipe_alloc_factor), (size_t)1)
                     : FLAGS_pipe_alloc_size;
 
-                groute::router::Router<TRemote> worklist_router(
-                    context, groute::router::Policy::CreateRingPolicy(ngpus));
+                groute::Router<TRemote> worklist_router(
+                    context, groute::Policy::CreateRingPolicy(ngpus));
 
                 groute::DistributedWorklist<TLocal, TRemote> distributed_worklist(context, worklist_router, ngpus);
 
@@ -408,8 +408,8 @@ namespace graphs {
                     ? max((size_t)(context.host_graph.nnodes * FLAGS_pipe_alloc_factor), (size_t)1)
                     : FLAGS_pipe_alloc_size;
 
-                groute::router::Router<TRemote> worklist_router(
-                    context, groute::router::Policy::CreateRingPolicy(ngpus));
+                groute::Router<TRemote> worklist_router(
+                    context, groute::Policy::CreateRingPolicy(ngpus));
 
                 groute::opt::DistributedWorklist<TLocal, TRemote, SplitOps> distributed_worklist(context, worklist_router, ngpus, FLAGS_prio_delta);
 

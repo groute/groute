@@ -109,11 +109,11 @@ bool RunCCMAsyncAtomic(int ngpus)
         cc::EdgePartitioner partitioner(ngpus, context.nvtxs, all_edges, configuration.vertex_partitioning);
 
         auto reduction_policy = FLAGS_tree_topology
-            ? groute::router::Policy::CreateTreeReductionPolicy(ngpus)
-            : groute::router::Policy::CreateOneWayReductionPolicy(ngpus);
+            ? groute::Policy::CreateTreeReductionPolicy(ngpus)
+            : groute::Policy::CreateOneWayReductionPolicy(ngpus);
 
-        groute::router::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
-        groute::router::Router<component_t> reduction_router(context, reduction_policy);
+        groute::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
+        groute::Router<component_t> reduction_router(context, reduction_policy);
 
         groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
         groute::Link<Edge> send_link(host, input_router);

@@ -323,7 +323,7 @@ namespace bfs
         static void Init(
             groute::graphs::traversal::Context<bfs::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
-            groute::router::Router<remote_work_t>& worklist_router,
+            groute::Router<remote_work_t>& worklist_router,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
             index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);

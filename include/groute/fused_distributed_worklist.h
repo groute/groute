@@ -485,7 +485,7 @@ namespace groute {
 
         public:
             DistributedWorklistPeer(
-                Context& context, router::Router<TRemote>& router,
+                Context& context, Router<TRemote>& router,
                 IDistributedWorklist& distributed_worklist, int current_priority, const SplitOps& split_ops, DistributedWorklistFlags flags,
                 Endpoint endpoint, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs)
                 :
@@ -641,7 +641,7 @@ namespace groute {
             typedef DistributedWorklistPeer<TLocal, TRemote, SplitOps> PeerType;
 
             Context& m_context;
-            router::Router<TRemote>& m_router;
+            Router<TRemote>& m_router;
             int m_ngpus;
 
             std::vector< std::shared_ptr<PeerType> > m_peers;
@@ -668,7 +668,7 @@ namespace groute {
 
         public:
 
-            DistributedWorklist(Context& context, router::Router<TRemote>& router, int ngpus, int priority_delta) :
+            DistributedWorklist(Context& context, Router<TRemote>& router, int ngpus, int priority_delta) :
                 m_context(context), m_router(router), m_ngpus(ngpus), m_active_peers_counter(ngpus),
                 m_high_prio_work(0), m_low_prio_work(0), m_priority_delta(priority_delta), m_current_priority(priority_delta), m_reported_work(0)
             {

@@ -679,7 +679,7 @@ namespace pr
         static void Init(
             groute::graphs::traversal::Context<pr::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
-            groute::router::Router<remote_work_t>& worklist_router,
+            groute::Router<remote_work_t>& worklist_router,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
             distributed_worklist.ReportWork(context.host_graph.nnodes); // PR starts with all nodes

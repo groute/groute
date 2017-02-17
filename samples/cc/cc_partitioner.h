@@ -215,7 +215,7 @@ namespace cc
         }
     };
 
-    class EdgeScatterPolicy : public groute::router::IPolicy
+    class EdgeScatterPolicy : public groute::IPolicy
     {
     private:
         groute::RoutingTable m_routing_table;
@@ -231,10 +231,10 @@ namespace cc
             return m_routing_table;
         }
 
-        groute::router::Route GetRoute(groute::Endpoint src, void* message_metadata) override
+        groute::Route GetRoute(groute::Endpoint src, void* message_metadata) override
         {
             assert(src.IsHost());
-            groute::router::Route route;
+            groute::Route route;
 
             if (message_metadata == nullptr)
             {
@@ -244,7 +244,7 @@ namespace cc
             else
             {
                 route.dst_endpoints = ((EdgesMetadata*)message_metadata)->dst_endpoints; // expecting the void* metadata to contain an EdgesMetadata structure  
-                route.strategy = groute::router::Priority;
+                route.strategy = groute::Priority;
             }
 
             return route;

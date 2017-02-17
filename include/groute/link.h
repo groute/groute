@@ -47,25 +47,25 @@
 namespace groute {
     
     template <typename T>
-    class Link : public router::IPipelinedReceiver <T>, public router::ISender <T>
+    class Link : public IPipelinedReceiver <T>, public ISender <T>
     {
     private:
-        router::ISender<T>* m_sender;
-        std::shared_ptr<router::IPipelinedReceiver<T>> m_receiver;
-        std::shared_ptr<router::Router<T>> m_p2p_router; // Used only for direct links between endpoints
+        ISender<T>* m_sender;
+        std::shared_ptr<IPipelinedReceiver<T>> m_receiver;
+        std::shared_ptr<Router<T>> m_p2p_router; // Used only for direct links between endpoints
     
     public:
         Link() : m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
         }
 
-        Link(Endpoint from, router::Router<T>& to, size_t packet_size = 0, size_t num_buffers = 0) : 
+        Link(Endpoint from, Router<T>& to, size_t packet_size = 0, size_t num_buffers = 0) : 
             m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
             m_sender = to.GetSender(from, packet_size, num_buffers);
         }
     
-        Link(router::Router<T>& from, Endpoint to, size_t packet_size, size_t num_buffers) : 
+        Link(Router<T>& from, Endpoint to, size_t packet_size, size_t num_buffers) : 
             m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
             m_receiver = from.CreatePipelinedReceiver(to, packet_size, num_buffers);
@@ -74,19 +74,19 @@ namespace groute {
         Link(Context& context, Endpoint from, Endpoint to, size_t receive_packet_size, size_t receive_num_buffers, size_t send_packet_size = 0, size_t send_num_buffers = 0) : 
             m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
-            m_p2p_router = std::make_shared<router::Router<T>>(context, router::Policy::CreateP2PPolicy(from, to)); // must keep a reference to the router
+            m_p2p_router = std::make_shared<Router<T>>(context, Policy::CreateP2PPolicy(from, to)); // must keep a reference to the router
             
             m_sender = m_p2p_router->GetSender(from, send_packet_size, send_num_buffers); 
             m_receiver = m_p2p_router->CreatePipelinedReceiver(to, receive_packet_size, receive_num_buffers);
         }
     
-        router::ISender<T>* GetSender() const
+        ISender<T>* GetSender() const
         {
             assert(m_sender);
             return m_sender;
         }
     
-        router::IPipelinedReceiver<T>* GetReceiver() const
+        IPipelinedReceiver<T>* GetReceiver() const
         {
             assert(m_receiver.get());
             return m_receiver.get();
@@ -97,7 +97,7 @@ namespace groute {
             GetReceiver()->Sync();
         }
     
-        std::shared_future< router::PendingSegment<T> > Receive() override
+        std::shared_future< PendingSegment<T> > Receive() override
         {
             return GetReceiver()->Receive();
         }
@@ -107,7 +107,7 @@ namespace groute {
             GetReceiver()->ReleaseBuffer(segment, ready_event);
         }
         
-        std::shared_future< router::PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
+        std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
         {
             return GetReceiver()->Receive(dst_buffer, ready_event);
         }
