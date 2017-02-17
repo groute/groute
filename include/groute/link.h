@@ -59,12 +59,14 @@ namespace groute {
         {
         }
 
-        Link(Endpoint from, router::IRouter<T>& to, size_t packet_size = 0, size_t num_buffers = 0) : m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
+        Link(Endpoint from, router::Router<T>& to, size_t packet_size = 0, size_t num_buffers = 0) : 
+            m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
             m_sender = to.GetSender(from, packet_size, num_buffers);
         }
     
-        Link(router::IRouter<T>& from, Endpoint to, size_t packet_size, size_t num_buffers) : m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
+        Link(router::Router<T>& from, Endpoint to, size_t packet_size, size_t num_buffers) : 
+            m_sender(nullptr), m_receiver(nullptr), m_p2p_router(nullptr)
         {
             m_receiver = from.CreatePipelinedReceiver(to, packet_size, num_buffers);
         }

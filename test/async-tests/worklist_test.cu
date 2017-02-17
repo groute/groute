@@ -150,18 +150,15 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     groute::Context context(ngpus);
 
-    //
-    // Input routing  
-    //
-    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));    
-    groute::router::ISender<int>* input_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0)); 
+    groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+    groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(host, groute::Endpoint::Range(ngpus)));    
+    groute::Link<int> send_link(host, input_router);
 
-    std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > input_receivers;
+    std::vector< groute::Link<int> > receiver_links;
 
     for (int i = 0; i < ngpus; ++i)
     {
-        auto receiver = input_router.CreatePipelinedReceiver(i, max_work_size, 1);
-        input_receivers.push_back(std::move(receiver));
+        receiver_links.push_back(groute::Link<int>(input_router, i, max_work_size, 1));
     }
 
     srand(static_cast <unsigned> (22522));
@@ -172,8 +169,8 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
         host_worklist.push_back((rand()*round_up(histo_size, RAND_MAX)) % histo_size);
     }
 
-    input_sender->Send(groute::Segment<int>(&host_worklist[0], host_worklist.size()), groute::Event());
-    input_sender->Shutdown();
+    send_link.Send(groute::Segment<int>(&host_worklist[0], host_worklist.size()), groute::Event());
+    send_link.Shutdown();
     //
     //
     //
@@ -211,7 +208,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
             auto& worklist_peer = worklist_peers[i];
 
-            auto input_fut = input_receivers[i]->Receive();
+            auto input_fut = receiver_links[i].Receive();
             auto input_seg = input_fut.get();
 
             distributed_worklist.ReportWork(input_seg.GetSegmentSize());

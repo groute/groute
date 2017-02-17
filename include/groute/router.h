@@ -48,6 +48,10 @@
 
 
 namespace groute {
+    
+    template <typename T>
+    class Link;
+
     namespace router {
 
         /**
@@ -254,21 +258,10 @@ namespace groute {
             virtual Route GetRoute(Endpoint src, void* message_metadata) = 0;
         };
 
-        struct IRouterBase // an untyped base interface for the Router
-        {
-            virtual ~IRouterBase() { }
-            virtual void Shutdown() = 0;
-        };
-
-        template <typename T>
-        struct IRouter : IRouterBase
+        struct IRouter // an untyped base interface for the Router
         {
             virtual ~IRouter() { }
-
-            virtual ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size, size_t num_chunks) = 0;
-            virtual IReceiver<T>* GetReceiver(Endpoint endpoint) = 0;
-
-            virtual std::unique_ptr< IPipelinedReceiver<T> > CreatePipelinedReceiver(Endpoint endpoint, size_t chunk_size, size_t num_buffers) = 0;
+            virtual void Shutdown() = 0;
         };
 
         /**
@@ -276,9 +269,10 @@ namespace groute {
         *        The router routs data from a sender into one/many receivers
         */
         template <typename T>
-        class Router : public IRouter < T >
+        class Router : public IRouter
         {
-        private:
+            friend class Link < T > ;
+
             Context& m_context;
 
             std::shared_ptr<IPolicy> m_policy;
@@ -759,7 +753,13 @@ namespace groute {
                 }
             }
 
-            ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0) override
+        private:
+
+            //
+            // Internal router API, used by Link
+            //
+
+            ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0)
             {
                 if (m_senders.find(endpoint) == m_senders.end())
                     // no active sender, this means this endpoint was not registered as a sender by the policy
@@ -781,7 +781,7 @@ namespace groute {
                 return m_senders.at(endpoint).get();
             }
 
-            IReceiver<T>* GetReceiver(Endpoint endpoint) override
+            IReceiver<T>* GetReceiver(Endpoint endpoint) 
             {
                 if (m_receivers.find(endpoint) == m_receivers.end())
                     // no active receiver, this means this endpoint was not registered as a receiver by the policy
@@ -798,7 +798,7 @@ namespace groute {
                 return m_receivers.at(endpoint).get();
             }
 
-            std::unique_ptr< IPipelinedReceiver<T> > CreatePipelinedReceiver(Endpoint endpoint, size_t chunk_size, size_t num_buffers) override
+            std::unique_ptr< IPipelinedReceiver<T> > CreatePipelinedReceiver(Endpoint endpoint, size_t chunk_size, size_t num_buffers)
             {
                 return groute::make_unique<PipelinedReceiver<T>>(m_context, GetReceiver(endpoint), endpoint, chunk_size, num_buffers);
             }

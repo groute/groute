@@ -246,8 +246,8 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
                         groute::router::Router<T>& gather,
                         groute::internal::Barrier& barrier) {
         groute::Stream stm(ctx.GetPhysicalDevice(endpoint));
-        groute::Link<T> sock_in(scatter, endpoint, maxout, FLAGS_pipeline);
-        groute::Link<T> sock_out(endpoint, gather, maxout, FLAGS_pipeline);
+        groute::Link<T> link_in(scatter, endpoint, maxout, FLAGS_pipeline);
+        groute::Link<T> link_out(endpoint, gather, maxout, FLAGS_pipeline);
 
         dim3 block_dims(256);
 
@@ -273,9 +273,9 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         // Work thread
         while (true) 
         {
-            groute::router::PendingSegment<T> seg = sock_in.Receive().get();
+            groute::router::PendingSegment<T> seg = link_in.Receive().get();
             if (seg.Empty()) break;
-            groute::Segment<T> outseg = sock_out.GetSendBuffer();
+            groute::Segment<T> outseg = link_out.GetSendBuffer();
 
             total_input += seg.GetSegmentSize();
             seg.Wait(stm.cuda_stream);    
@@ -296,13 +296,13 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
 
             total_processed += *outsz;
 
-            auto sendevf = sock_out.Send(groute::Segment<T>(outseg.GetSegmentPtr(), *outsz), ev);
+            auto sendevf = link_out.Send(groute::Segment<T>(outseg.GetSegmentPtr(), *outsz), ev);
 
-            sock_out.ReleaseSendBuffer(outseg, sendevf.get());
-            sock_in.ReleaseBuffer(seg, groute::Event());
+            link_out.ReleaseSendBuffer(outseg, sendevf.get());
+            link_in.ReleaseBuffer(seg, groute::Event());
         }
 
-        sock_out.Shutdown();
+        link_out.Shutdown();
         
         range.Stop();
         barrier.Sync();

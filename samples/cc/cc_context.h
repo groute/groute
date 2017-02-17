@@ -65,8 +65,8 @@ namespace cc
     class Context : public groute::Context // the global context for the cc problem solving  
     {
     public:
-        groute::pinned_vector<groute::graphs::Edge>   host_edges;
-        std::vector<int>            host_parents;
+        groute::pinned_vector<groute::graphs::Edge>     host_edges;
+        std::vector<component_t>                        host_parents;
 
         int ngpus;
         unsigned int nvtxs, nedges;

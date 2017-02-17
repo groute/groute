@@ -706,7 +706,7 @@ public:
             groute::router::Router<remote_work_t>& worklist_router,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
-            index_t source_node = min(max(0, FLAGS_source_node), context.host_graph.nnodes - 1);
+            index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
             
             auto partitioner = graph_manager.GetGraphPartitioner();
             if (partitioner->NeedsReverseLookup())
@@ -720,10 +720,10 @@ public:
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
 
-            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint(0));
-            work_sender->Send(
-                 groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
-            work_sender->Shutdown();
+            groute::Link<remote_work_t> send_link(groute::Endpoint::HostEndpoint(0), worklist_router);
+
+            send_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+            send_link.Shutdown();
         }
 
         template<
@@ -747,7 +747,7 @@ public:
             TWeightDatum<distance_t>& weights_datum, TDistanceDatum<distance_t>& distances_datum, 
             UnusedData&... data)
         {
-            return SSSPHostNaive(graph, weights_datum.GetHostDataPtr(), min( max(0, FLAGS_source_node), graph.nnodes-1));
+            return SSSPHostNaive(graph, weights_datum.GetHostDataPtr(), min( max((index_t)0, (index_t)FLAGS_source_node), graph.nnodes-1));
         }
 
         static int Output(const char *file, const std::vector<distance_t>& distances)

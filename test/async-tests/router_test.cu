@@ -156,10 +156,10 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
     groute::router::Router<int> router(context, 
         groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
 
-    groute::router::ISender<int>* host_sender = router.GetSender(groute::Endpoint::HostEndpoint(0)); 
+    groute::Link<int> send_link(groute::Endpoint::HostEndpoint(0), router);
 
     std::vector<int*> dev_sums(ngpus);
-    std::vector< std::unique_ptr< groute::router::IPipelinedReceiver<int> > > dev_receivers;
+    std::vector< groute::Link<int> > receive_links;
     std::vector< std::thread > dev_threads;
 
     for (int i = 0; i < ngpus; ++i)
@@ -169,18 +169,17 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
         CUASSERT_NOERR(cudaMalloc(&dev_sums[i], sizeof(int)));
         CUASSERT_NOERR(cudaMemset(dev_sums[i], 0, sizeof(int)));
 
-        // Init dev receivers  
-        auto receiver = router.CreatePipelinedReceiver(i, chunk_size, 3);
-        dev_receivers.push_back(std::move(receiver));
+        // Init device receive links  
+        receive_links.push_back(groute::Link<int>(router, i, chunk_size, 3));
     }
 
-    host_sender->Send(groute::Segment<int>(&host_buffer[0], buffer_size, buffer_size, 0), groute::Event());
-    host_sender->Shutdown();
+    send_link.Send(groute::Segment<int>(&host_buffer[0], buffer_size, buffer_size, 0), groute::Event());
+    send_link.Shutdown();
 
     for (int i = 0; i < ngpus; ++i)
     {
         // Sync (for pre loading case)
-        dev_receivers[i]->Sync();
+        receive_links[i].Sync();
 
         // Run threads  
         std::thread dev_worker([&, i]()
@@ -190,7 +189,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
 
             while (true)
             {
-                auto fut = dev_receivers[i]->Receive();
+                auto fut = receive_links[i].Receive();
                 auto seg = fut.get();
                 if (seg.Empty()) break;
 
@@ -203,7 +202,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
                 SumKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (seg.GetSegmentPtr(), seg.GetSegmentSize(), dev_sums[i]);
 
-                dev_receivers[i]->ReleaseBuffer(seg, context.RecordEvent(i, stream.cuda_stream));
+                receive_links[i].ReleaseBuffer(seg, context.RecordEvent(i, stream.cuda_stream));
             }
 
             stream.Sync();
@@ -264,8 +263,9 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     groute::router::Router<int> input_router(context, groute::router::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
     groute::router::Router<int> reduction_router(context, groute::router::Policy::CreateOneWayReductionPolicy(ngpus));
     
-    groute::router::ISender<int>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0)); 
-    groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint(0)); // TODO
+    groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+    groute::Link<int> send_link(host, input_router);
+    groute::Link<int> receive_link(reduction_router, host, 0, 0); // no pipelining here 
 
     std::vector<int*> dev_bins(ngpus);
     std::vector< groute::Link<int> > input_links;
@@ -285,8 +285,8 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
         reduction_out_links.push_back(groute::Link<int>(i, reduction_router));
     }
 
-    host_sender->Send(groute::Segment<int>(&host_input[0], buffer_size, buffer_size, 0), groute::Event());
-    host_sender->Shutdown();
+    send_link.Send(groute::Segment<int>(&host_input[0], buffer_size, buffer_size, 0), groute::Event());
+    send_link.Shutdown();
 
     for (int i = 0; i < ngpus; ++i)
     {
@@ -355,7 +355,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     }
 
     std::vector<int> host_bins(bins);
-    host_receiver->Receive(groute::Buffer<int>(host_bins.data(), bins), groute::Event()).wait();
+    receive_link.Receive(groute::Buffer<int>(host_bins.data(), bins), groute::Event()).wait();
 
     int errors = 0;
     for (size_t i = 0; i < bins; ++i)

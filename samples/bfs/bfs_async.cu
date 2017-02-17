@@ -326,7 +326,7 @@ namespace bfs
             groute::router::Router<remote_work_t>& worklist_router,
             groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
-            index_t source_node = min(max(0, FLAGS_source_node), context.host_graph.nnodes - 1);
+            index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
             auto partitioner = graph_manager.GetGraphPartitioner();
             if (partitioner->NeedsReverseLookup())
@@ -340,10 +340,10 @@ namespace bfs
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
 
-            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Endpoint::HostEndpoint(0));
-            work_sender->Send(
-                groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
-            work_sender->Shutdown();
+            groute::Link<remote_work_t> send_link(groute::Endpoint::HostEndpoint(0), worklist_router);
+
+            send_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+            send_link.Shutdown();
         }
 
         template<typename TGraphAllocator, typename TGraphDatum, typename...UnusedData>
@@ -356,7 +356,7 @@ namespace bfs
         template<typename...UnusedData>
         static std::vector<level_t> Host(groute::graphs::host::CSRGraph& graph, UnusedData&... data)
         {
-            return BFSHost(graph, min(max(0, FLAGS_source_node), graph.nnodes - 1));
+            return BFSHost(graph, min(max((index_t)0, (index_t)FLAGS_source_node), graph.nnodes - 1));
         }
 
         static int Output(const char *file, const std::vector<level_t>& levels)

@@ -499,7 +499,7 @@ namespace groute {
 
     public:
         DistributedWorklistPeer(
-            Context& context, router::IRouter<TRemote>& router, 
+            Context& context, router::Router<TRemote>& router, 
             IDistributedWorklist& distributed_worklist, const SplitOps& split_ops, DistributedWorklistFlags flags,
             Endpoint endpoint, int ngpus, size_t max_work_size, size_t max_exch_size, size_t exch_buffs) 
             :
@@ -604,7 +604,7 @@ namespace groute {
     {
     private:
         Context& m_context;
-        router::IRouter<TRemote>& m_router;
+        router::Router<TRemote>& m_router;
         int m_ngpus;
 
         std::atomic<int> m_active_peers_counter;
@@ -624,7 +624,7 @@ namespace groute {
 
     public:
 
-        DistributedWorklist(Context& context, router::IRouter<TRemote>& router, int ngpus) :
+        DistributedWorklist(Context& context, router::Router<TRemote>& router, int ngpus) :
         m_context(context), m_router(router), m_ngpus(ngpus), m_work_counter(0), m_active_peers_counter(ngpus), m_reported_work(0)
         {
             if (false)

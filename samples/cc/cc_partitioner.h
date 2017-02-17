@@ -221,8 +221,6 @@ namespace cc
         groute::RoutingTable m_routing_table;
 
     public:
-        std::vector<Partition> parents_partitions;
-
         EdgeScatterPolicy(int ngpus)
         {
             m_routing_table[groute::Endpoint::HostEndpoint(0)] = groute::Endpoint::Range(ngpus);

@@ -80,19 +80,18 @@ bool RunCCMAsyncAtomic(int ngpus)
     cc::Configuration configuration;
     if (FLAGS_auto_config)
         cc::BuildConfigurationAuto( // Deduce the configuration automatically  
-        ngpus, context.nedges, context.nvtxs,
-        FLAGS_compute_latency_ratio, FLAGS_degree_threshold,
-        FLAGS_nonatomic_rounds,
-        configuration
-        );
+            ngpus, context.nedges, context.nvtxs,
+            FLAGS_compute_latency_ratio, FLAGS_degree_threshold,
+            FLAGS_nonatomic_rounds,
+            configuration);
     else
         cc::BuildConfiguration(
-        ngpus, context.nedges, context.nvtxs,
-        FLAGS_edge_segs, FLAGS_parent_segs,
-        FLAGS_edges_chunk, FLAGS_parents_chunk,
-        FLAGS_input_buffers, FLAGS_reduce_buffers,
-        FLAGS_nonatomic_rounds, FLAGS_vertex_partitioning,
-        configuration);
+            ngpus, context.nedges, context.nvtxs,
+            FLAGS_edge_segs, FLAGS_parent_segs,
+            FLAGS_edges_chunk, FLAGS_parents_chunk,
+            FLAGS_input_buffers, FLAGS_reduce_buffers,
+            FLAGS_nonatomic_rounds, FLAGS_vertex_partitioning,
+            configuration);
 
     if (FLAGS_verbose) configuration.print();
 
@@ -114,18 +113,19 @@ bool RunCCMAsyncAtomic(int ngpus)
             : groute::router::Policy::CreateOneWayReductionPolicy(ngpus);
 
         groute::router::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
-        groute::router::Router<int> reduction_router(context, reduction_policy);
+        groute::router::Router<component_t> reduction_router(context, reduction_policy);
 
-        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Endpoint::HostEndpoint(0));
-        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Endpoint::HostEndpoint(0)); // TODO
+        groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+        groute::Link<Edge> send_link(host, input_router);
+        groute::Link<component_t> receive_link(reduction_router, host, 0, 0); // no pipelining here 
 
         IntervalRangeMarker iter_rng(context.nedges, "begin");
 
         for (auto& edge_partition : partitioner.edge_partitions)
         {
-            host_sender->Send(edge_partition, groute::Event());
+            send_link.Send(edge_partition, groute::Event());
         }
-        host_sender->Shutdown();
+        send_link.Shutdown();
 
         psw.stop();
         par_total_ms += psw.ms();
@@ -171,8 +171,8 @@ bool RunCCMAsyncAtomic(int ngpus)
         }
 
         barrier.Sync();
-        Stopwatch sw(true); // all threads are running, start timing
-        barrier.Sync();
+        Stopwatch sw(true); // all threads are running, start timing 
+        barrier.Sync();     // and signal
 
         for (int i = 0; i < ngpus; ++i)
         {
@@ -185,8 +185,8 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         // output is received from the drain device (by topology)  
         auto seg
-            = host_receiver
-                ->Receive(groute::Buffer<int>(&context.host_parents[0], context.nvtxs), groute::Event())
+            = receive_link
+                .Receive(groute::Buffer<component_t>(&context.host_parents[0], context.nvtxs), groute::Event())
                 .get();
         seg.Sync();
     }
