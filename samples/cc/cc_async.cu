@@ -112,8 +112,8 @@ bool RunCCMAsyncAtomic(int ngpus)
             ? groute::Policy::CreateTreeReductionPolicy(ngpus)
             : groute::Policy::CreateOneWayReductionPolicy(ngpus);
 
-        groute::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
-        groute::Router<component_t> reduction_router(context, reduction_policy);
+        groute::Router<Edge> input_router(context, (std::shared_ptr<groute::IPolicy>)std::make_shared<cc::EdgeScatterPolicy>(ngpus), 1, ngpus);
+        groute::Router<component_t> reduction_router(context, reduction_policy, ngpus, ngpus+1);
 
         groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
         groute::Link<Edge> send_link(host, input_router);

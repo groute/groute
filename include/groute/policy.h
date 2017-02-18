@@ -55,12 +55,7 @@ namespace groute {
         {
         }
     
-        RoutingTable GetRoutingTable() override
-        {
-            return m_routing_table;
-        }
-    
-        Route GetRoute(Endpoint src, void* message_metadata) override
+        Route GetRoute(Endpoint src, const EndpointList& router_dst, void* message_metadata) const override
         {
             assert(m_routing_table.find(src) != m_routing_table.end());
     
@@ -69,31 +64,31 @@ namespace groute {
     
         static std::shared_ptr<IPolicy> CreateBroadcastPolicy(Endpoint src, const EndpointList& dst_endpoints)
         {
-            RoutingTable topology;
-            topology[src] = dst_endpoints;
-            return std::make_shared<Policy>(topology, Broadcast);
+            RoutingTable routing_table;
+            routing_table[src] = dst_endpoints;
+            return std::make_shared<Policy>(routing_table, Broadcast);
         }
     
         static std::shared_ptr<IPolicy> CreateScatterPolicy(Endpoint src, const EndpointList& dst_endpoints)
         {
-            RoutingTable topology;
-            topology[src] = dst_endpoints;
-            return std::make_shared<Policy>(topology, Availability);
+            RoutingTable routing_table;
+            routing_table[src] = dst_endpoints;
+            return std::make_shared<Policy>(routing_table, Availability);
         }
     
         static std::shared_ptr<IPolicy> CreateP2PPolicy(Endpoint src, Endpoint dst)
         {
-            RoutingTable topology;
-            topology[src] = { dst };
-            return std::make_shared<Policy>(topology, Availability);
+            RoutingTable routing_table;
+            routing_table[src] = { dst };
+            return std::make_shared<Policy>(routing_table, Availability);
         }
     
         static std::shared_ptr<IPolicy> CreateGatherPolicy(Endpoint dst, const EndpointList& src_endpoints)
         {
-            RoutingTable topology;
+            RoutingTable routing_table;
             for (const auto& src : src_endpoints)
-                topology[src] = { dst };
-            return std::make_shared<Policy>(topology, Availability);
+                routing_table[src] = { dst };
+            return std::make_shared<Policy>(routing_table, Availability);
         }
     
         static std::shared_ptr<IPolicy> CreateOneWayReductionPolicy(int ndevs)

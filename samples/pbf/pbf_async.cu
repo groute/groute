@@ -315,9 +315,9 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
     ////////////////////////////////////////
 
     groute::Router<T> scatter(ctx, 
-        groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
+        groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)), 1, ngpus);
     groute::Router<T> gather(ctx,
-        groute::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
+        groute::Policy::CreateGatherPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)), ngpus, 1);
     size_t chunksize = FLAGS_chunksize;
 
     groute::Link<T> dist(groute::Endpoint::HostEndpoint(0), scatter, chunksize, 1);

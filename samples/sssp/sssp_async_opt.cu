@@ -394,7 +394,7 @@ namespace sssp {
             static void Init(
                 groute::graphs::traversal::Context<sssp::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
-                groute::Router<remote_work_t>& worklist_router,
+                groute::Link<remote_work_t>& input_link,
                 groute::opt::DistributedWorklist<local_work_t, remote_work_t, SplitOps>& distributed_worklist)
             {
                 index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
@@ -410,11 +410,7 @@ namespace sssp {
 
                 std::vector<remote_work_t> initial_work;
                 initial_work.push_back(remote_work_t(source_node, 0));
-
-                groute::Link<remote_work_t> send_link(groute::Endpoint::HostEndpoint(0), worklist_router);
-
-                send_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
-                send_link.Shutdown();
+                input_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
             }
 
             template<

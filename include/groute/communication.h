@@ -49,39 +49,39 @@ namespace groute {
     */
     template <typename T>
     class PendingSegment : public Segment < T >
+    {
+    private:
+        Event m_ready_event; // the event indicating data is valid  
+
+    public:
+        PendingSegment(T* segment_ptr, size_t total_size, size_t segment_size, size_t segment_offset, const Event& ready_event) :
+            Segment<T>(segment_ptr, total_size, segment_size, segment_offset), m_ready_event(ready_event)
         {
-        private:
-            Event m_ready_event; // the event indicating data is valid  
 
-        public:
-            PendingSegment(T* segment_ptr, size_t total_size, size_t segment_size, size_t segment_offset, const Event& ready_event) :
-                Segment<T>(segment_ptr, total_size, segment_size, segment_offset), m_ready_event(ready_event)
-            {
+        }
 
-            }
+        PendingSegment() : Segment<T>(), m_ready_event()
+        {
 
-            PendingSegment() : Segment<T>(), m_ready_event()
-            {
+        }
 
-            }
+        Event GetEvent() const { return m_ready_event; }
 
-            Event GetEvent() const { return m_ready_event; }
+        void Wait(cudaStream_t stream) const
+        {
+            m_ready_event.Wait(stream);
+        }
 
-            void Wait(cudaStream_t stream) const
-            {
-                m_ready_event.Wait(stream);
-            }
+        void Sync() const
+        {
+            m_ready_event.Sync();
+        }
 
-            void Sync() const
-            {
-                m_ready_event.Sync();
-            }
-
-            bool Query() const
-            {
-                return m_ready_event.Query();
-            }
-        };
+        bool Query() const
+        {
+            return m_ready_event.Query();
+        }
+    };
     
     /**
     * @brief The sender should be used by data producers for distributing segments of data
@@ -89,59 +89,59 @@ namespace groute {
     */
     template <typename T>
     struct ISender
-        {
-            virtual ~ISender() { }
+    {
+        virtual ~ISender() { }
 
-            /// @brief Send a segment of data to any peer/s 
-            virtual std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) = 0;
+        /// @brief Send a segment of data to any peer/s 
+        virtual std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) = 0;
 
-            /// @brief Report no more segments from this sender  
-            virtual void Shutdown() = 0;
+        /// @brief Report no more segments from this sender  
+        virtual void Shutdown() = 0;
 
 
-            /// @brief (for pipelined senders only)
-            virtual Segment<T> GetSendBuffer() = 0;
-            virtual void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
-        };
+        /// @brief (for pipelined senders only)
+        virtual Segment<T> GetSendBuffer() = 0;
+        virtual void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
+    };
     
     /**
     * @brief A receiver for data segments
     */
     template <typename T>
     struct IReceiver
-        {
-            virtual ~IReceiver() { }
+    {
+        virtual ~IReceiver() { }
 
-            /// @brief Receive a segment of data from peers into the provided buffer
-            virtual std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) = 0;
+        /// @brief Receive a segment of data from peers into the provided buffer
+        virtual std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) = 0;
 
-            /// @brief Can this receiver still receive segments
-            virtual bool Active() = 0;
-        };
+        /// @brief Can this receiver still receive segments
+        virtual bool Active() = 0;
+    };
     
     /**
     * @brief A pipelined receiver which encapsulates memory buffer management
     */
     template <typename T>
     struct IPipelinedReceiver 
-        {
-            virtual ~IPipelinedReceiver() { }
+    {
+        virtual ~IPipelinedReceiver() { }
 
-            /// @brief Sync on all current memory operations in the pipeline
-            virtual void Sync() const = 0;
+        /// @brief Sync on all current memory operations in the pipeline
+        virtual void Sync() const = 0;
 
-            /// @brief Receive a segment of data from peers
-            virtual std::shared_future< PendingSegment<T> > Receive() = 0;
+        /// @brief Receive a segment of data from peers
+        virtual std::shared_future< PendingSegment<T> > Receive() = 0;
 
-            /// @brief Release the segment buffer for reuse
-            virtual void ReleaseBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
-            
-            /// @brief Receive a segment of data from peers into the provided buffer
-            virtual std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) = 0;
+        /// @brief Release the segment buffer for reuse
+        virtual void ReleaseBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
+        
+        /// @brief Receive a segment of data from peers into the provided buffer
+        virtual std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) = 0;
 
-            /// @brief Can this receiver still receive segments
-            virtual bool Active() = 0;
-        };
+        /// @brief Can this receiver still receive segments
+        virtual bool Active() = 0;
+    };
     
     /**
     * @brief Pipelined receiver implementation
@@ -155,10 +155,10 @@ namespace groute {
         std::vector <T*> m_endpoint_buffers;
         std::deque  < std::shared_future< PendingSegment<T> > > m_promised_segments;
         Endpoint m_endpoint;
-        groute::Context& m_ctx;
+        Context& m_ctx;
     
     public:
-        PipelinedReceiver(groute::Context& context, IReceiver<T>* receiver, Endpoint endpoint, size_t chunk_size, size_t num_buffers = 2) :
+        PipelinedReceiver(Context& context, IReceiver<T>* receiver, Endpoint endpoint, size_t chunk_size, size_t num_buffers = 2) :
             m_receiver(receiver), m_chunk_size(chunk_size), m_endpoint_buffers(num_buffers), m_endpoint(endpoint), m_ctx(context)
         {
             context.SetDevice(endpoint);

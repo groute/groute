@@ -151,7 +151,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     groute::Context context(ngpus);
 
     groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
-    groute::Router<int> input_router(context, groute::Policy::CreateScatterPolicy(host, groute::Endpoint::Range(ngpus)));    
+    groute::Router<int> input_router(context, groute::Policy::CreateScatterPolicy(host, groute::Endpoint::Range(ngpus)), 1, ngpus);    
     groute::Link<int> send_link(host, input_router);
 
     std::vector< groute::Link<int> > receiver_links;
@@ -175,8 +175,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     //
     //
 
-    groute::Router<int> exchange_router(
-        context, groute::Policy::CreateRingPolicy(ngpus));
+    groute::Router<int> exchange_router(context, groute::Policy::CreateRingPolicy(ngpus), ngpus, ngpus);
     
     groute::DistributedWorklist<int, int> distributed_worklist(context, exchange_router, ngpus);
 

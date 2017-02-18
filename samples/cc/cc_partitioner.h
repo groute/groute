@@ -218,27 +218,22 @@ namespace cc
     class EdgeScatterPolicy : public groute::IPolicy
     {
     private:
-        groute::RoutingTable m_routing_table;
+        groute::EndpointList m_dst_endpoints;
 
     public:
         EdgeScatterPolicy(int ngpus)
         {
-            m_routing_table[groute::Endpoint::HostEndpoint(0)] = groute::Endpoint::Range(ngpus);
+            m_dst_endpoints = groute::Endpoint::Range(ngpus);
         }
 
-        groute::RoutingTable GetRoutingTable() override
-        {
-            return m_routing_table;
-        }
-
-        groute::Route GetRoute(groute::Endpoint src, void* message_metadata) override
+        groute::Route GetRoute(groute::Endpoint src, const groute::EndpointList& router_dst, void* message_metadata) const override
         {
             assert(src.IsHost());
             groute::Route route;
 
             if (message_metadata == nullptr)
             {
-                route.dst_endpoints = m_routing_table[src];
+                route.dst_endpoints = m_dst_endpoints;
             }
 
             else

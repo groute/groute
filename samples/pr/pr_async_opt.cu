@@ -515,7 +515,7 @@ namespace pr {
             static void Init(
                 groute::graphs::traversal::Context<pr::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
-                groute::Router<remote_work_t>& worklist_router,
+                groute::Link<remote_work_t>& input_link,
                 groute::opt::DistributedWorklist<local_work_t, remote_work_t, SplitOps>& distributed_worklist)
             {
                 distributed_worklist.ReportHighPrioWork(context.host_graph.nnodes, 0, "Host", groute::Endpoint::HostEndpoint(0), true); // PR starts with all nodes

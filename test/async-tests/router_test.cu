@@ -154,7 +154,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
         context.EnableFragmentation(fragment_size);
 
     groute::Router<int> router(context, 
-        groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
+        groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)), 1, ngpus);
 
     groute::Link<int> send_link(groute::Endpoint::HostEndpoint(0), router);
 
@@ -260,8 +260,8 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     if (fragment_size > 0)
         context.EnableFragmentation(fragment_size);
 
-    groute::Router<int> input_router(context, groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)));
-    groute::Router<int> reduction_router(context, groute::Policy::CreateOneWayReductionPolicy(ngpus));
+    groute::Router<int> input_router(context, groute::Policy::CreateScatterPolicy(groute::Endpoint::HostEndpoint(0), groute::Endpoint::Range(ngpus)), 1, ngpus);
+    groute::Router<int> reduction_router(context, groute::Policy::CreateOneWayReductionPolicy(ngpus), ngpus, ngpus+1);
     
     groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
     groute::Link<int> send_link(host, input_router);

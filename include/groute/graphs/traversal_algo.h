@@ -255,7 +255,8 @@ namespace graphs {
                     : FLAGS_pipe_alloc_size;
 
                 groute::Router<TRemote> worklist_router(
-                    context, groute::Policy::CreateRingPolicy(ngpus));
+                    context, groute::Policy::CreateRingPolicy(ngpus), ngpus+1, ngpus);
+                groute::Link<TRemote> input_link(groute::Endpoint::HostEndpoint(0), worklist_router); // Used for work initialized by host such as BFS source vertex  
 
                 groute::DistributedWorklist<TLocal, TRemote> distributed_worklist(context, worklist_router, ngpus);
 
@@ -321,7 +322,8 @@ namespace graphs {
 
                 barrier.Sync(); // wait for devices to init 
 
-                Algo::Init(context, dev_graph_allocator, worklist_router, distributed_worklist); // init from host
+                Algo::Init(context, dev_graph_allocator, input_link, distributed_worklist); // init from host
+                input_link.Shutdown();
 
                 Stopwatch sw(true); // all threads are running, start timing
                 
@@ -409,7 +411,8 @@ namespace graphs {
                     : FLAGS_pipe_alloc_size;
 
                 groute::Router<TRemote> worklist_router(
-                    context, groute::Policy::CreateRingPolicy(ngpus));
+                    context, groute::Policy::CreateRingPolicy(ngpus), ngpus+1, ngpus);
+                groute::Link<TRemote> input_link(groute::Endpoint::HostEndpoint(0), worklist_router); // Used for work initialized by host such as BFS source vertex  
 
                 groute::opt::DistributedWorklist<TLocal, TRemote, SplitOps> distributed_worklist(context, worklist_router, ngpus, FLAGS_prio_delta);
 
@@ -473,7 +476,8 @@ namespace graphs {
 
                 barrier.Sync(); // wait for devices to init 
 
-                Algo::Init(context, dev_graph_allocator, worklist_router, distributed_worklist); // init from host
+                Algo::Init(context, dev_graph_allocator, input_link, distributed_worklist); // init from host
+                input_link.Shutdown();
 
                 Stopwatch sw(true); // all threads are running, start timing
                 

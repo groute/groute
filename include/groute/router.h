@@ -233,9 +233,9 @@ namespace groute {
     class Link;
 
     enum RouteStrategy
-        {
-            Availability, Priority, Broadcast,
-        };
+    {
+        Availability, Priority, Broadcast,
+    };
     
     struct Route
     {
@@ -244,7 +244,7 @@ namespace groute {
     
         Route(RouteStrategy strategy = Availability) : strategy(strategy) { }
     
-        Route(const std::vector<Endpoint>& dst_endpoints, RouteStrategy strategy = Availability) :
+        Route(const EndpointList& dst_endpoints, RouteStrategy strategy = Availability) :
             dst_endpoints(dst_endpoints), strategy(strategy)
         {
         }
@@ -253,12 +253,12 @@ namespace groute {
     struct IPolicy
     {
         virtual ~IPolicy() { }
-    
-        virtual RoutingTable GetRoutingTable() = 0; // TODO: we can avoid this
-        virtual Route GetRoute(Endpoint src, void* message_metadata) = 0;
+        virtual Route GetRoute(Endpoint src, const EndpointList& router_dst, void* message_metadata) const = 0;
     };
+
+    typedef std::function<Route(Endpoint src, const EndpointList& router_dst, void* message_metadata)> PolicyFunc;
     
-    struct IRouter // an untyped base interface for the Router
+    struct IRouter // An untyped base interface for the Router
         {
             virtual ~IRouter() { }
             virtual void Shutdown() = 0;
@@ -271,54 +271,24 @@ namespace groute {
     template <typename T>
     class Router : public IRouter
     {
-        friend class Link < T > ;
+        friend class Link <T>;
     
         Context& m_context;
     
         std::shared_ptr<IPolicy> m_policy;
         RoutingTable m_possible_routes;
+        EndpointList m_router_dst;
+
+        int m_num_inputs, m_num_outputs;
+        std::mutex m_initialization_mutex;
+
+        volatile bool m_finalized;
     
-        class InactiveReceiver;
-        class InactiveSender;
         class Receiver;
         class Sender;
     
         std::map<Endpoint, std::unique_ptr<Receiver> > m_receivers;
         std::map<Endpoint, std::unique_ptr<Sender> > m_senders;
-    
-        std::map<Endpoint, std::unique_ptr<InactiveReceiver> > m_inactive_receivers;
-        std::map<Endpoint, std::unique_ptr<InactiveSender> > m_inactive_senders;
-        std::mutex m_inactive_mutex;
-    
-        class InactiveReceiver : public IReceiver < T >
-        {
-        public:
-            std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
-            {
-                return groute::completed_future(PendingSegment<T>());
-            }
-    
-            bool Active() override { return false; }
-        };
-    
-        class InactiveSender : public ISender < T >
-            {
-            public:
-                InactiveSender()  { }
-                ~InactiveSender() { }
-
-                std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
-                {
-                    throw std::exception(); // cannot send segments on an inactive sender
-                }
-
-                void Shutdown() override
-                {
-                }
-
-                Segment<T> GetSendBuffer() override { return Segment<T>();  }
-                void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) override {}
-            };
     
         class Receiver : public IReceiver < T >
         {
@@ -339,6 +309,8 @@ namespace groute {
     
             std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
             {
+                m_router.AssertFinalized();
+
                 auto receive_op =
                     std::make_shared< internal::ReceiveOperation<T> >(m_endpoint, dst_buffer, ready_event);
     
@@ -435,93 +407,93 @@ namespace groute {
         };
     
         struct SegmentPool
+        {
+            Endpoint m_endpoint;
+            std::deque<T*> m_buffers;
+            std::deque<T*> m_buffers_in_use;
+            int m_chunksize;
+
+            std::mutex m_lock, m_destructo_lock;
+
+            SegmentPool(const Context& ctx, Endpoint endpoint, int chunksize, int numchunks) :
+                m_endpoint(endpoint), m_chunksize(chunksize)
             {
-                Endpoint m_endpoint;
-                std::deque<T*> m_buffers;
-                std::deque<T*> m_buffers_in_use;
-                int m_chunksize;
-
-                std::mutex m_lock, m_destructo_lock;
-
-                SegmentPool(const Context& ctx, Endpoint endpoint, int chunksize, int numchunks) :
-                    m_endpoint(endpoint), m_chunksize(chunksize)
+                ctx.SetDevice(endpoint);
+                for (int i = 0; i < numchunks; ++i)
                 {
-                    ctx.SetDevice(endpoint);
-                    for (int i = 0; i < numchunks; ++i)
+                    T * buff;
+
+                    if (endpoint.IsHost())
+                        GROUTE_CUDA_CHECK(cudaMallocHost(&buff, chunksize*sizeof(T)));
+                    else
+                        GROUTE_CUDA_CHECK(cudaMalloc(&buff, chunksize*sizeof(T)));
+
+                    m_buffers.push_back(buff);
+                }
+            }
+
+            ~SegmentPool()
+            {
+                std::lock_guard<std::mutex> guard2(m_destructo_lock);
+                std::lock_guard<std::mutex> guard(m_lock);
+                
+                if (m_buffers_in_use.size() > 0)
+                {
+                    printf("ERROR: SOME (%llu) BUFFERS ARE STILL IN USE, NOT DEALLOCATING\n",
+                           m_buffers_in_use.size());
+                }
+                for (T* buff : m_buffers)
+                {
+                    if (m_endpoint.IsHost())
+                        GROUTE_CUDA_CHECK(cudaFreeHost(buff));
+                    else
+                        GROUTE_CUDA_CHECK(cudaFree(buff));
+                }
+
+                m_buffers.clear();
+                m_buffers_in_use.clear();
+            }
+
+            Segment<T> GetBuffer()
+            {
+                std::lock_guard<std::mutex> guard(m_lock);
+
+                if (m_buffers.empty())
+                    return Segment<T>();
+
+                T* buff = m_buffers.front();
+                m_buffers.pop_front();
+                m_buffers_in_use.push_back(buff);
+                return Segment<T>(buff, m_chunksize);
+            }
+
+            void ReleaseBuffer(T* buff)
+            {
+                std::lock_guard<std::mutex> guard(m_lock);
+
+                for (auto iter = m_buffers_in_use.begin(); iter != m_buffers_in_use.end(); ++iter)
+                {
+                    if (*iter == buff)
                     {
-                        T * buff;
-
-                        if (endpoint.IsHost())
-                            GROUTE_CUDA_CHECK(cudaMallocHost(&buff, chunksize*sizeof(T)));
-                        else
-                            GROUTE_CUDA_CHECK(cudaMalloc(&buff, chunksize*sizeof(T)));
-
+                        m_buffers_in_use.erase(iter);
                         m_buffers.push_back(buff);
+                        return;
                     }
                 }
+                printf("ERROR: NO SUCH BUFFER EXISTS\n");
+            }
 
-                ~SegmentPool()
-                {
-                    std::lock_guard<std::mutex> guard2(m_destructo_lock);
-                    std::lock_guard<std::mutex> guard(m_lock);
-                    
-                    if (m_buffers_in_use.size() > 0)
-                    {
-                        printf("ERROR: SOME (%llu) BUFFERS ARE STILL IN USE, NOT DEALLOCATING\n",
-                               m_buffers_in_use.size());
-                    }
-                    for (T* buff : m_buffers)
-                    {
-                        if (m_endpoint.IsHost())
-                            GROUTE_CUDA_CHECK(cudaFreeHost(buff));
-                        else
-                            GROUTE_CUDA_CHECK(cudaFree(buff));
-                    }
+            void ReleaseBufferEvent(T* buff, int physical_dev, const Event& ev)
+            {
+                std::lock_guard<std::mutex> guard(m_destructo_lock);
 
-                    m_buffers.clear();
-                    m_buffers_in_use.clear();
-                }
+                if (physical_dev >= 0)
+                    GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
+                ev.Sync();
 
-                Segment<T> GetBuffer()
-                {
-                    std::lock_guard<std::mutex> guard(m_lock);
-
-                    if (m_buffers.empty())
-                        return Segment<T>();
-
-                    T* buff = m_buffers.front();
-                    m_buffers.pop_front();
-                    m_buffers_in_use.push_back(buff);
-                    return Segment<T>(buff, m_chunksize);
-                }
-
-                void ReleaseBuffer(T* buff)
-                {
-                    std::lock_guard<std::mutex> guard(m_lock);
-
-                    for (auto iter = m_buffers_in_use.begin(); iter != m_buffers_in_use.end(); ++iter)
-                    {
-                        if (*iter == buff)
-                        {
-                            m_buffers_in_use.erase(iter);
-                            m_buffers.push_back(buff);
-                            return;
-                        }
-                    }
-                    printf("ERROR: NO SUCH BUFFER EXISTS\n");
-                }
-
-                void ReleaseBufferEvent(T* buff, int physical_dev, const Event& ev)
-                {
-                    std::lock_guard<std::mutex> guard(m_destructo_lock);
-
-                    if (physical_dev >= 0)
-                        GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
-                    ev.Sync();
-
-                    ReleaseBuffer(buff);
-                }
-            };
+                ReleaseBuffer(buff);
+            }
+        };
     
         class Sender : public ISender < T >
         {
@@ -539,6 +511,8 @@ namespace groute {
     
             std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
             {
+                m_router.AssertFinalized();
+
                 if (m_shutdown)
                 {
                     //throw std::exception();
@@ -614,7 +588,7 @@ namespace groute {
             {
                 auto aggregated_event = std::make_shared<AggregatedEventPromise>();  
     
-                Route route = m_router.m_policy->GetRoute(m_endpoint, segment.metadata);
+                Route route = m_router.m_policy->GetRoute(m_endpoint, m_router.m_router_dst, segment.metadata);
 #ifndef NDEBUG
                 AssertRoute(m_endpoint, route);
 #endif
@@ -696,53 +670,40 @@ namespace groute {
                 }
             }
         };
+
+        class PolicyFuncObject : public IPolicy
+        {
+            PolicyFunc m_func;
+        public:
+            PolicyFuncObject(const PolicyFunc& func) : m_func(func) { }
+            Route GetRoute(Endpoint src, const EndpointList& router_dst, void* message_metadata) const override 
+            { return m_func(src, router_dst, message_metadata); }
+        };
     
         void QueueMemcpyWork(std::shared_ptr< internal::SendOperation<T> > send_op, std::shared_ptr< internal::ReceiveOperation<T> > receive_op)
-            {
-                m_context.QueueMemcpyWork(
-                    receive_op->GetSrcEndpoint(), receive_op->GetSrcSegment().GetSegmentPtr(),
-                    receive_op->GetDstEndpoint(), receive_op->GetDstBuffer().GetPtr(),
-                    receive_op->GetSrcSegment().GetSegmentSize() * sizeof(T),
-                    send_op->GetSrcReadyEvent(), receive_op->GetDstReadyEvent(),
-                    [send_op, receive_op](size_t bytes, const Event& ready_event) // captures both shared pointers  
+        {
+            m_context.QueueMemcpyWork(
+                receive_op->GetSrcEndpoint(), receive_op->GetSrcSegment().GetSegmentPtr(),
+                receive_op->GetDstEndpoint(), receive_op->GetDstBuffer().GetPtr(),
+                receive_op->GetSrcSegment().GetSegmentSize() * sizeof(T),
+                send_op->GetSrcReadyEvent(), receive_op->GetDstReadyEvent(),
+                [send_op, receive_op](size_t bytes, const Event& ready_event) // callback, captures both shared pointers  
                 {
                     receive_op->Complete(ready_event);
                     send_op->ReportProgress(bytes / sizeof(T), ready_event);
                 }
-                );
-            }
+            );
+        }
     
     public:
-        Router(Context& context, const std::shared_ptr<IPolicy>& policy) :
-            m_context(context), m_policy(policy), m_possible_routes(policy->GetRoutingTable())
+        Router(Context& context, const std::shared_ptr<IPolicy>& policy, int num_inputs, int num_outputs) :
+            m_context(context), m_policy(policy), m_num_inputs(num_inputs), m_num_outputs(num_outputs), m_finalized(false)
         {
-            context.RequireMemcpyLanes(m_possible_routes);
-    
-            std::set<Endpoint> dst_endpoints;
-    
-            for (auto& p : m_possible_routes)
-            {
-                Endpoint src_endpoint = p.first;
-                m_senders[src_endpoint] = groute::make_unique<Sender>(*this, src_endpoint);
-    
-                // add all dst endpoints to the set
-                dst_endpoints.insert(std::begin(p.second), std::end(p.second));
-            }
-    
-            // create a receiver for each dst endpoint
-            for (auto dst_endpoint : dst_endpoints)
-            {
-                m_receivers[dst_endpoint] = groute::make_unique<Receiver>(*this, dst_endpoint);
-            }
-    
-            for (auto& p : m_possible_routes)
-            {
-                Endpoint src_endpoint = p.first;
-                for (auto dst_endpoint : p.second)
-                {
-                    m_receivers[dst_endpoint]->AddPossibleSender(src_endpoint);
-                }
-            }
+        }
+
+        Router(Context& context, const PolicyFunc& policy, int num_inputs, int num_outputs) :
+            m_context(context), m_policy(std::make_shared<PolicyFuncObject>(policy)), m_num_inputs(num_inputs), m_num_outputs(num_outputs), m_finalized(false)
+        {
         }
     
         void Shutdown() override
@@ -754,45 +715,94 @@ namespace groute {
         }
     
     private:
+
+        void AssertNotFinalized() const
+        {
+            if (m_finalized) 
+            {
+                printf("\n\nWarning: Router is finalized, cannot add more links at this point\n\n");
+                throw std::exception("Router already finalized"); 
+            }
+        }
+
+        void AssertFinalized() const
+        {
+            if (!m_finalized) 
+            {
+                printf("\n\nWarning: Router is not finalized yet, cannot send and receive data through links\n\n");
+                throw std::exception("Router not finalized yet");
+            }
+        }
+
+        void FinalizeInitialization()
+        {
+            m_finalized = true;
+
+            m_possible_routes.clear();
+            m_router_dst.clear();
+            m_router_dst.reserve(m_num_outputs);
+
+            for (auto& receiver : m_receivers)
+            {
+                m_router_dst.push_back(receiver.first);
+            }
+
+            for (auto& sender : m_senders)
+            {
+                Endpoint src = sender.first;
+
+                // When passing nullptr as metadata, the policy is expected to return all possible routes between src -> router_dst
+                auto route = m_policy->GetRoute(src, m_router_dst, nullptr); 
+
+                // Keep the info in a table for future assertions and Shutdown management
+                m_possible_routes[src] = route.dst_endpoints; 
+
+                for (Endpoint dst : route.dst_endpoints)
+                {
+                    if (m_receivers.find(dst) == m_receivers.end()) throw std::exception(); // TODO
+
+                    m_context.RequireMemcpyLane(src, dst);
+                    m_receivers[dst]->AddPossibleSender(src);
+                }
+            }
+        }
+
+        void TryFinalizeInitialization()
+        {
+            int registered_inputs = m_senders.size();
+            int registered_outputs = m_receivers.size();
+
+            if (m_num_inputs == registered_inputs && m_num_outputs == registered_outputs)
+            {
+                FinalizeInitialization();
+            }
+        }
     
         //
-        // Internal router API, used by Link
+        // Internal router API, used by friend class Link
         //
     
         ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0)
+        {
+            std::lock_guard<std::mutex> guard(m_initialization_mutex);
+            if (m_senders.find(endpoint) == m_senders.end())
             {
-                if (m_senders.find(endpoint) == m_senders.end())
-                    // no active sender, this means this endpoint was not registered as a sender by the policy
-                    // just create an inactive one
-                {
-                    std::lock_guard<std::mutex> guard(m_inactive_mutex);
-                    if (m_inactive_senders.find(endpoint) == m_inactive_senders.end())
-                    {
-                        m_inactive_senders[endpoint] = groute::make_unique<InactiveSender>();
-                    }
-                    return m_inactive_senders.at(endpoint).get();
-                }
-
-                // Create pipelined sender
-                if (num_chunks > 0)
-                    m_senders[endpoint] = groute::make_unique<Sender>(*this, endpoint, chunk_size, num_chunks);
-
-
-                return m_senders.at(endpoint).get();
+                AssertNotFinalized();
+                m_senders[endpoint] = groute::make_unique<Sender>(*this, endpoint, chunk_size, num_chunks); // TODO: split Sender -> Sender, PipelinedSender 
+                TryFinalizeInitialization();
             }
+
+            return m_senders.at(endpoint).get();
+        }
     
         IReceiver<T>* GetReceiver(Endpoint endpoint) 
         {
+            std::lock_guard<std::mutex> guard(m_initialization_mutex);
             if (m_receivers.find(endpoint) == m_receivers.end())
-                // no active receiver, this means this endpoint was not registered as a receiver by the policy
-                // just create an inactive one
             {
-                std::lock_guard<std::mutex> guard(m_inactive_mutex);
-                if (m_inactive_receivers.find(endpoint) == m_inactive_receivers.end())
-                {
-                    m_inactive_receivers[endpoint] = groute::make_unique<InactiveReceiver>();
-                }
-                return m_inactive_receivers.at(endpoint).get();
+                AssertNotFinalized();
+                m_receivers[endpoint] = groute::make_unique<Receiver>(*this, endpoint); 
+                TryFinalizeInitialization();
             }
     
             return m_receivers.at(endpoint).get();
@@ -802,6 +812,8 @@ namespace groute {
         {
             return groute::make_unique<PipelinedReceiver<T>>(m_context, GetReceiver(endpoint), endpoint, chunk_size, num_buffers);
         }
+
+        // TODO: CreatePipelinedSender
     };
 }
 
