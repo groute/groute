@@ -158,8 +158,8 @@ namespace groute {
             {
                 // Fragmented Copy 
 
-                size_t fragment = fragment_size < 0 ? copy_bytes : fragment_size;
-                size_t pos = 0;
+                int64_t fragment = fragment_size < 0 ? copy_bytes : fragment_size;
+                int64_t pos = 0;
                 while (pos < copy_bytes)
                 {
                     void *receive = ((void*)((char*)dst_buffer + pos));

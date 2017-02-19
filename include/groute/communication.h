@@ -163,12 +163,6 @@ namespace groute {
         {
             context.SetDevice(endpoint);
     
-            if (!m_receiver->Active()) // inactive receiver, no need for buffers
-            {
-                m_chunk_size = 0;
-                m_endpoint_buffers.clear();
-            }
-    
             for (size_t i = 0; i < m_endpoint_buffers.size(); ++i)
             {
                 T *buffer;
@@ -218,11 +212,8 @@ namespace groute {
         {
             if (m_promised_segments.empty())
             {
-                if (!m_receiver->Active())
-                {
-                    return groute::completed_future(PendingSegment<T>());
-                }
-                throw std::exception(); // m_promised_segments is empty (usage: Start -> Receive -> Release)
+                printf("\n\nWarning: No pipeline buffers available (usage: Receive -> Release)\n\n");
+                throw std::exception("No pipeline buffers"); 
             }
     
             auto pseg = m_promised_segments.front();
@@ -235,7 +226,7 @@ namespace groute {
             T* buffer = segment.GetSegmentPtr();
 #ifndef NDEBUG
             if (std::find(m_endpoint_buffers.begin(), m_endpoint_buffers.end(), buffer) == m_endpoint_buffers.end())
-                throw std::exception(); // unrecognized buffer
+                throw std::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
             m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(buffer, m_chunk_size), ready_event));
         }

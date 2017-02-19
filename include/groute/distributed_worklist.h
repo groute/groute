@@ -511,6 +511,8 @@ namespace groute {
             void* mem_buffer;
             size_t mem_size;
 
+            // TODO (with worklist refactor): links are allocated just above, which creates a problem in some cases (e.g. virtual endpoints)
+
             mem_buffer = context.Alloc(FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
             m_local_input_worklist = groute::CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal));
 

@@ -309,8 +309,6 @@ namespace groute {
     
             std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
             {
-                m_router.AssertFinalized();
-
                 auto receive_op =
                     std::make_shared< internal::ReceiveOperation<T> >(m_endpoint, dst_buffer, ready_event);
     
@@ -370,6 +368,8 @@ namespace groute {
     
             void CheckPossibleSenders()
             {
+                if (!m_router.m_finalized) return;
+
                 std::lock_guard<std::mutex> guard(m_mutex);
                 if (m_send_queue.empty() && m_possible_senders.empty())
                 {
@@ -729,15 +729,13 @@ namespace groute {
         {
             if (!m_finalized) 
             {
-                printf("\n\nWarning: Router is not finalized yet, cannot send and receive data through links\n\n");
+                printf("\n\nWarning: Router is not finalized yet, cannot send data through links\n\n");
                 throw std::exception("Router not finalized yet");
             }
         }
 
         void FinalizeInitialization()
         {
-            m_finalized = true;
-
             m_possible_routes.clear();
             m_router_dst.clear();
             m_router_dst.reserve(m_num_outputs);
@@ -759,11 +757,22 @@ namespace groute {
 
                 for (Endpoint dst : route.dst_endpoints)
                 {
-                    if (m_receivers.find(dst) == m_receivers.end()) throw std::exception(); // TODO
+                    if (m_receivers.find(dst) == m_receivers.end()) 
+                    {
+                        printf("\n\nWarning: Policy specified a destination endpoint which was not registered to the router through any link\n\n");
+                        throw std::exception("Destination not found");
+                    }
 
                     m_context.RequireMemcpyLane(src, dst);
                     m_receivers[dst]->AddPossibleSender(src);
                 }
+            }
+
+            m_finalized = true;
+
+            for (auto& receiver : m_receivers)
+            {
+                receiver.second->CheckPossibleSenders();
             }
         }
 

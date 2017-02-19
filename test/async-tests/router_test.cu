@@ -74,7 +74,7 @@ __global__ void MergeBinsKernel(int *bins1, int *bins2, int bins_count)
     }
 }
 
-void FragmentedCopy(size_t buffer_size, size_t mtu)
+void FragmentedCopy(size_t buffer_size, size_t fragment_size)
 {
     CUASSERT_NOERR(cudaSetDevice(0));
 
@@ -96,7 +96,7 @@ void FragmentedCopy(size_t buffer_size, size_t mtu)
     dim3 block_dims(512, 1, 1);
     dim3 grid_dims(round_up(host.size(), block_dims.x), 1, 1);
 
-    auto copy = std::make_shared<groute::MemcpyWork>(context.GetEventPool(0), mtu);
+    auto copy = std::make_shared<groute::MemcpyWork>(context.GetEventPool(0), fragment_size);
 
     copy->physical_src_dev = groute::Device::Host;
     copy->src_buffer = &host[0];
@@ -375,6 +375,9 @@ TEST(Async, FragmentedCopy)
 {
     FragmentedCopy(256, 1024);
     FragmentedCopy(1024, 1024);
+    FragmentedCopy(1024, 64);
+    FragmentedCopy(1000, 64);
+    FragmentedCopy(1000, 115);
     FragmentedCopy(256 * 1024, 1024);
     FragmentedCopy(256 * 1024, 256 * 1024);
 }
@@ -388,10 +391,23 @@ TEST(Async, H2DevsRouter)
     H2DevsRouting(4, 256 * 1024, 1024, -1);
 }
 
-TEST(Async, P2PDevsRouter)
+TEST(Async, P2PDevsRouter_2_64)
+{
+    P2PDevsRouting(2, 256 * 1024, 1024, 64);
+}
+
+TEST(Async, P2PDevsRouter_2_M1)
 {
     P2PDevsRouting(2, 256 * 1024, 1024, -1);
-    P2PDevsRouting(2, 256 * 1024, 1024, 64);
+}
+
+TEST(Async, P2PDevsRouter_3_115)
+{
     P2PDevsRouting(3, 256 * 1024, 1000, 115);
+}
+
+TEST(Async, P2PDevsRouter_4_M1)
+{
     P2PDevsRouting(4, 256 * 1024, 1024, -1);
+    P2PDevsRouting(4, 256 * 1024, 2000, -1);
 }
