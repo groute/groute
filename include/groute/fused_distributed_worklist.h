@@ -352,7 +352,7 @@ namespace groute {
 
                 while (true)
                 {
-                    auto fut = m_link_in.Receive();
+                    auto fut = m_link_in.PipelinedReceive();
                     auto seg = fut.get();
                     if (seg.Empty()) break;
 
@@ -365,7 +365,7 @@ namespace groute {
 
                     Event split_ev = m_context.RecordEvent(m_endpoint, stream.cuda_stream);
 
-                    m_link_in.ReleaseBuffer(seg, split_ev);
+                    m_link_in.ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), split_ev);
 
                     // Signal (after sync)
                     stream.Sync();

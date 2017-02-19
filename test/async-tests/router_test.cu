@@ -179,7 +179,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
     for (int i = 0; i < ngpus; ++i)
     {
         // Sync (for pre loading case)
-        receive_links[i].Sync();
+        receive_links[i].PipelineSync();
 
         // Run threads  
         std::thread dev_worker([&, i]()
@@ -189,7 +189,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
 
             while (true)
             {
-                auto fut = receive_links[i].Receive();
+                auto fut = receive_links[i].PipelinedReceive();
                 auto seg = fut.get();
                 if (seg.Empty()) break;
 
@@ -202,7 +202,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
                 SumKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (seg.GetSegmentPtr(), seg.GetSegmentSize(), dev_sums[i]);
 
-                receive_links[i].ReleaseBuffer(seg, context.RecordEvent(i, stream.cuda_stream));
+                receive_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
             }
 
             stream.Sync();
@@ -299,7 +299,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
             // First, add all input segments into the local histogram  
             while (true)
             {
-                auto fut = input_links[i].Receive();
+                auto fut = input_links[i].PipelinedReceive();
                 auto seg = fut.get();
                 if (seg.Empty()) break;
 
@@ -312,10 +312,10 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
                 HistogramKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (seg.GetSegmentPtr(), seg.GetSegmentSize(), dev_bins[i]);
 
-                input_links[i].ReleaseBuffer(seg, context.RecordEvent(i, stream.cuda_stream));
+                input_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
             }
 
-            auto fut = reduction_in_links[i].Receive();
+            auto fut = reduction_in_links[i].PipelinedReceive();
 
             // Merge histogram segments
             while (true)
@@ -332,8 +332,8 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
                 MergeBinsKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (dev_bins[i] + seg.GetSegmentOffset(), seg.GetSegmentPtr(), seg.GetSegmentSize());
 
-                reduction_in_links[i].ReleaseBuffer(seg, context.RecordEvent(i, stream.cuda_stream));
-                fut = reduction_in_links[i].Receive();
+                reduction_in_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
+                fut = reduction_in_links[i].PipelinedReceive();
             }
 
             // Distribute the local segment to peers 

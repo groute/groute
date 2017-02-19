@@ -149,8 +149,8 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         for (int i = 0; i < ngpus; ++i)
         {
-            // Sync the first copy operations (exclude from timing)
-            solvers[i]->edges_in.Sync();
+            // Sync the first pipeline copy operations (exclude from timing)
+            solvers[i]->edges_in.PipelineSync();
         }
 
         groute::internal::Barrier barrier(ngpus + 1); // barrier for accurate timing  

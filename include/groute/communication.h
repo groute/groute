@@ -45,13 +45,52 @@
 namespace groute {
 
     /**
+    * @brief Represents a pending buffer
+    */
+    template <typename T>
+    class PendingBuffer : public Buffer < T >
+    {
+    private:
+        Event m_ready_event; // The event indicating buffer is ready for use  
+
+    public:
+        PendingBuffer(T* ptr, size_t size, const Event& ready_event) :
+            Buffer<T>(ptr, size), m_ready_event(ready_event)
+        {
+
+        }
+
+        Event GetEvent() const { return m_ready_event; }
+
+        void Wait(cudaStream_t stream) const
+        {
+            m_ready_event.Wait(stream);
+        }
+
+        void Wait(const Stream& stream) const
+        {
+            m_ready_event.Wait(stream.cuda_stream);
+        }
+
+        void Sync() const
+        {
+            m_ready_event.Sync();
+        }
+
+        bool Query() const
+        {
+            return m_ready_event.Query();
+        }
+    };
+
+    /**
     * @brief Represents a pending segment of valid data
     */
     template <typename T>
     class PendingSegment : public Segment < T >
     {
     private:
-        Event m_ready_event; // the event indicating data is valid  
+        Event m_ready_event; // The event indicating data is valid  
 
     public:
         PendingSegment(T* segment_ptr, size_t total_size, size_t segment_size, size_t segment_offset, const Event& ready_event) :
@@ -70,6 +109,11 @@ namespace groute {
         void Wait(cudaStream_t stream) const
         {
             m_ready_event.Wait(stream);
+        }
+
+        void Wait(const Stream& stream) const
+        {
+            m_ready_event.Wait(stream.cuda_stream);
         }
 
         void Sync() const
@@ -97,11 +141,28 @@ namespace groute {
 
         /// @brief Report no more segments from this sender  
         virtual void Shutdown() = 0;
+    };
 
+    /**
+    * @brief A sender with pipeline support for send buffers
+    */
+    template <typename T>
+    struct IPipelinedSender
+    {
+        virtual ~IPipelinedSender() { }
 
-        /// @brief (for pipelined senders only)
-        virtual Segment<T> GetSendBuffer() = 0;
-        virtual void ReleaseSendBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
+        /// @brief Send a segment of data to any peer/s 
+        virtual std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) = 0;
+
+        /// @brief Report no more segments from this sender  
+        virtual void Shutdown() = 0;
+
+        /// @brief Wait for an available send buffer
+        virtual PendingBuffer<T> GetPipelineSendBuffer() = 0;
+
+        /// @brief Sends data and pipelines the buffer
+        /// @note Sent buffers are queued for reuse through GetPipelineSendBuffer
+        virtual void PipelinedSend(const Segment<T>& segment, const Event& ready_event) = 0;
     };
     
     /**
@@ -126,40 +187,34 @@ namespace groute {
     struct IPipelinedReceiver 
     {
         virtual ~IPipelinedReceiver() { }
-
-        /// @brief Sync on all current memory operations in the pipeline
-        virtual void Sync() const = 0;
-
-        /// @brief Receive a segment of data from peers
-        virtual std::shared_future< PendingSegment<T> > Receive() = 0;
-
-        /// @brief Release the segment buffer for reuse
-        virtual void ReleaseBuffer(const Segment<T>& segment, const Event& ready_event) = 0;
         
         /// @brief Receive a segment of data from peers into the provided buffer
         virtual std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) = 0;
 
         /// @brief Can this receiver still receive segments
         virtual bool Active() = 0;
+
+        /// @brief Receive a segment of data from peers
+        virtual std::shared_future< PendingSegment<T> > PipelinedReceive() = 0;
+
+        /// @brief Release the segment buffer for reuse
+        virtual void ReleasePipelineReceiveBuffer(T* buffer, const Event& ready_event) = 0;
+
+        /// @brief Sync on all current memory operations in the pipeline
+        virtual void PipelineSync() const = 0;
     };
-    
-    /**
-    * @brief Pipelined receiver implementation
-    */
+
     template <typename T>
-    class PipelinedReceiver : public IPipelinedReceiver < T >
+    class Pipeline
     {
-    private:
-        IReceiver<T>* m_receiver;
+    protected:
         size_t m_chunk_size;
         std::vector <T*> m_endpoint_buffers;
-        std::deque  < std::shared_future< PendingSegment<T> > > m_promised_segments;
         Endpoint m_endpoint;
         Context& m_ctx;
     
-    public:
-        PipelinedReceiver(Context& context, IReceiver<T>* receiver, Endpoint endpoint, size_t chunk_size, size_t num_buffers = 2) :
-            m_receiver(receiver), m_chunk_size(chunk_size), m_endpoint_buffers(num_buffers), m_endpoint(endpoint), m_ctx(context)
+        Pipeline(Context& context, Endpoint endpoint, size_t chunk_size, size_t num_buffers) :
+            m_chunk_size(chunk_size), m_endpoint_buffers(num_buffers), m_endpoint(endpoint), m_ctx(context)
         {
             context.SetDevice(endpoint);
     
@@ -176,14 +231,9 @@ namespace groute {
                 }
                 m_endpoint_buffers[i] = buffer;
             }
-    
-            for (size_t i = 0; i < m_endpoint_buffers.size(); ++i)
-            {
-                m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(m_endpoint_buffers[i], m_chunk_size), Event()));
-            }
         }
     
-        ~PipelinedReceiver()
+        virtual ~Pipeline()
         {
             m_ctx.SetDevice(m_endpoint);
     
@@ -199,8 +249,29 @@ namespace groute {
                 }
             }
         }
+    };
     
-        void Sync() const override
+    /**
+    * @brief Pipelined receiver implementation
+    */
+    template <typename T>
+    class PipelinedReceiver : public IPipelinedReceiver <T>, protected Pipeline<T>
+    {
+    private:
+        IReceiver<T>* m_receiver;
+        std::deque  < std::shared_future< PendingSegment<T> > > m_promised_segments;
+    
+    public:
+        PipelinedReceiver(Context& context, IReceiver<T>* receiver, Endpoint endpoint, size_t chunk_size, size_t num_buffers) :
+            Pipeline<T>(context, endpoint, chunk_size, num_buffers), m_receiver(receiver)
+        {
+            for (size_t i = 0; i < this->m_endpoint_buffers.size(); ++i)
+            {
+                m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(this->m_endpoint_buffers[i], this->m_chunk_size), Event()));
+            }
+        }
+    
+        void PipelineSync() const override
         {
             for (auto& pseg : m_promised_segments)
             {
@@ -208,11 +279,11 @@ namespace groute {
             }
         }
     
-        std::shared_future< PendingSegment<T> > Receive() override
+        std::shared_future< PendingSegment<T> > PipelinedReceive() override
         {
             if (m_promised_segments.empty())
             {
-                printf("\n\nWarning: No pipeline buffers available (usage: Receive -> Release)\n\n");
+                printf("\n\nWarning: No pipeline buffers available (usage: PipelinedReceive -> ReleasePipelineReceiveBuffer)\n\n");
                 throw std::exception("No pipeline buffers"); 
             }
     
@@ -221,14 +292,13 @@ namespace groute {
             return pseg;
         }
     
-        void ReleaseBuffer(const Segment<T>& segment, const Event& ready_event) override
+        void ReleasePipelineReceiveBuffer(T* buffer, const Event& ready_event) override
         {
-            T* buffer = segment.GetSegmentPtr();
 #ifndef NDEBUG
-            if (std::find(m_endpoint_buffers.begin(), m_endpoint_buffers.end(), buffer) == m_endpoint_buffers.end())
+            if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
                 throw std::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
-            m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(buffer, m_chunk_size), ready_event));
+            m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(buffer, this->m_chunk_size), ready_event));
         }
     
         std::shared_future< PendingSegment<T> > Receive(const Buffer<T>& dst_buffer, const Event& ready_event) override
@@ -239,6 +309,73 @@ namespace groute {
         bool Active() override
         {
             return m_receiver->Active();
+        }
+    };
+
+    /**
+    * @brief Pipelined sender implementation
+    */
+    template <typename T>
+    class PipelinedSender : public IPipelinedSender<T>, protected Pipeline<T>
+    {
+    private:
+        ISender<T>* m_sender;
+        std::deque  < std::shared_future< Event > > m_promised_events;
+        std::deque  < T* > m_promised_buffers; // The corresponding buffers depending on the events 
+
+    public:
+        PipelinedSender(Context& context, ISender<T>* sender, Endpoint endpoint, size_t chunk_size, size_t num_buffers) :
+            Pipeline<T>(context, endpoint, chunk_size, num_buffers), m_sender(sender)
+        {
+            for (size_t i = 0; i < this->m_endpoint_buffers.size(); ++i)
+            {
+                m_promised_events.push_back(groute::completed_future(Event()));
+                m_promised_buffers.push_back(this->m_endpoint_buffers[i]);
+            }
+        }
+
+        PendingBuffer<T> GetPipelineSendBuffer() override
+        {
+            if (m_promised_buffers.empty())
+            {
+                printf("\n\nWarning: No pipeline buffers available (usage: GetPipelineSendBuffer -> PipelinedSend)\n\n");
+                throw std::exception("No pipeline buffers"); 
+            }
+            assert(!m_promised_events.empty());
+    
+            auto fut = m_promised_events.front();
+            m_promised_events.pop_front();
+
+            auto buffer = m_promised_buffers.front();
+            m_promised_buffers.pop_front();
+
+            auto ev = fut.get(); // Block on event future 
+                                 // Note: assumes send buffers are handled by FIFO order in router, which is true unless segments have metadata attached
+
+            return PendingBuffer<T>(buffer, this->m_chunk_size, ev);
+        }
+
+        void PipelinedSend(const Segment<T>& segment, const Event& ready_event) override
+        {
+            T* buffer = segment.GetSegmentPtr();
+#ifndef NDEBUG
+            if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
+                throw std::exception("Unrecognized buffer in pipelined receiver"); 
+#endif
+            auto fut = m_sender->Send(segment, ready_event);
+
+            m_promised_events.push_back(fut);
+            m_promised_buffers.push_back(buffer);
+        }
+
+        std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
+        {
+            return m_sender->Send(segment, ready_event);
+        }
+
+        void Shutdown() override
+        {
+            m_sender->Shutdown();
         }
     };
 }

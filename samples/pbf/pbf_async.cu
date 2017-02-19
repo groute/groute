@@ -273,12 +273,14 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         // Work thread
         while (true) 
         {
-            groute::PendingSegment<T> seg = link_in.Receive().get();
+            groute::PendingSegment<T> seg = link_in.PipelinedReceive().get();
             if (seg.Empty()) break;
-            groute::Segment<T> outseg = link_out.GetSendBuffer();
+
+            groute::PendingBuffer<T> out_buffer = link_out.GetPipelineSendBuffer();
 
             total_input += seg.GetSegmentSize();
             seg.Wait(stm.cuda_stream);    
+            out_buffer.Wait(stm.cuda_stream);
 
             Marker::MarkWorkitems(seg.GetSegmentSize(), "Filter");
 
@@ -287,7 +289,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
             Filter<T, ComplexPredicate<T>> <<<grid_dims, block_dims, 0, 
                                                stm.cuda_stream>>>(seg.GetSegmentPtr(),
                                                                   seg.GetSegmentSize(),
-                                                                  outseg.GetSegmentPtr(), 
+                                                                  out_buffer.GetPtr(), 
                                                                   d_outsz);
             GetItemCount<<<1,1,0,stm.cuda_stream>>>(d_outsz, d_h_outsz);
             groute::Event ev = ctx.RecordEvent(endpoint, stm.cuda_stream);
@@ -296,10 +298,8 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
 
             total_processed += *outsz;
 
-            auto sendevf = link_out.Send(groute::Segment<T>(outseg.GetSegmentPtr(), *outsz), ev);
-
-            link_out.ReleaseSendBuffer(outseg, sendevf.get());
-            link_in.ReleaseBuffer(seg, groute::Event());
+            link_out.PipelinedSend(groute::Segment<T>(out_buffer.GetPtr(), *outsz), ev);
+            link_in.ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), groute::Event());
         }
 
         link_out.Shutdown();
@@ -307,7 +307,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         range.Stop();
         barrier.Sync();
 
-        printf("GPU%d: inputs: %llu, outputs: %llu\n", endpoint, total_input, total_processed);
+        printf("GPU%d: inputs: %llu, outputs: %llu\n", (groute::Endpoint::identity_type)endpoint, total_input, total_processed);
 
         cudaFree(d_outsz);
         cudaFreeHost(outsz);
@@ -362,7 +362,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
         // Aggregate segments one by one
         while (true)
         {
-            groute::PendingSegment<T> seg = collect.Receive().get();
+            groute::PendingSegment<T> seg = collect.PipelinedReceive().get();
             if (seg.Empty()) break;
 
             seg.Sync();
@@ -373,7 +373,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
             offset += seg.GetSegmentSize();
 
 
-            collect.ReleaseBuffer(seg, groute::Event());
+            collect.ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), groute::Event());
         }
         /////////////////
 

@@ -207,7 +207,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
             auto& worklist_peer = worklist_peers[i];
 
-            auto input_fut = receiver_links[i].Receive();
+            auto input_fut = receiver_links[i].PipelinedReceive();
             auto input_seg = input_fut.get();
 
             distributed_worklist.ReportWork(input_seg.GetSegmentSize());

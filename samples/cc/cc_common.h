@@ -251,8 +251,8 @@ namespace cc
             // Init
             problem.Init();
             
-            auto input_fut = edges_in.Receive();
-            auto reduce_fut = reduction_in.Receive();
+            auto input_fut = edges_in.PipelinedReceive();
+            auto reduce_fut = reduction_in.PipelinedReceive();
 
             groute::PendingSegment<int> merge_seg;
             groute::PendingSegment<Edge> input_seg;
@@ -280,8 +280,8 @@ namespace cc
                 // Work atomic
                 problem.WorkAtomic(input_seg);
 
-                edges_in.ReleaseBuffer(input_seg, problem.Record()); // dismiss depends on the recorded event  
-                input_fut = edges_in.Receive();
+                edges_in.ReleasePipelineReceiveBuffer(input_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                input_fut = edges_in.PipelinedReceive();
 
                 problem.Compress();   
 
@@ -301,8 +301,8 @@ namespace cc
                 // Merge
                 problem.Merge(merge_seg);
 
-                reduction_in.ReleaseBuffer(merge_seg, problem.Record()); // dismiss depends on the recorded event  
-                reduce_fut = reduction_in.Receive();
+                reduction_in.ReleasePipelineReceiveBuffer(merge_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                reduce_fut = reduction_in.PipelinedReceive();
             }
 
             // Makes sure the entire local segment is compressed  
