@@ -112,9 +112,9 @@ namespace groute {
             return GetReceiver()->PipelinedReceive();
         }
     
-        void ReleasePipelineReceiveBuffer(T* buffer, const Event& ready_event) override
+        void ReleaseReceiveBuffer(T* buffer, const Event& ready_event) override
         {
-            GetReceiver()->ReleasePipelineReceiveBuffer(buffer, ready_event);
+            GetReceiver()->ReleaseReceiveBuffer(buffer, ready_event);
         }
     
         std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override
@@ -127,9 +127,9 @@ namespace groute {
             GetSender()->Shutdown();
         }
     
-        PendingBuffer<T> GetPipelineSendBuffer() override
+        PendingBuffer<T> GetSendBuffer() override
         {
-            return GetSender()->GetPipelineSendBuffer();
+            return GetSender()->GetSendBuffer();
         }
         
         void PipelinedSend(const Segment<T>& segment, const Event& ready_event) override

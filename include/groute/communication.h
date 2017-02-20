@@ -59,6 +59,11 @@ namespace groute {
         {
 
         }
+        
+        PendingBuffer() : Buffer<T>(), m_ready_event()
+        {
+
+        }
 
         Event GetEvent() const { return m_ready_event; }
 
@@ -158,10 +163,10 @@ namespace groute {
         virtual void Shutdown() = 0;
 
         /// @brief Wait for an available send buffer
-        virtual PendingBuffer<T> GetPipelineSendBuffer() = 0;
+        virtual PendingBuffer<T> GetSendBuffer() = 0;
 
         /// @brief Sends data and pipelines the buffer
-        /// @note Sent buffers are queued for reuse through GetPipelineSendBuffer
+        /// @note Sent buffers are queued for reuse through GetSendBuffer
         virtual void PipelinedSend(const Segment<T>& segment, const Event& ready_event) = 0;
     };
     
@@ -198,7 +203,7 @@ namespace groute {
         virtual std::shared_future< PendingSegment<T> > PipelinedReceive() = 0;
 
         /// @brief Release the segment buffer for reuse
-        virtual void ReleasePipelineReceiveBuffer(T* buffer, const Event& ready_event) = 0;
+        virtual void ReleaseReceiveBuffer(T* buffer, const Event& ready_event) = 0;
 
         /// @brief Sync on all current memory operations in the pipeline
         virtual void PipelineSync() const = 0;
@@ -283,7 +288,7 @@ namespace groute {
         {
             if (m_promised_segments.empty())
             {
-                printf("\n\nWarning: No pipeline buffers available (usage: PipelinedReceive -> ReleasePipelineReceiveBuffer)\n\n");
+                printf("\n\nWarning: No pipeline buffers available (usage: PipelinedReceive -> ReleaseReceiveBuffer)\n\n");
                 throw std::exception("No pipeline buffers"); 
             }
     
@@ -292,7 +297,7 @@ namespace groute {
             return pseg;
         }
     
-        void ReleasePipelineReceiveBuffer(T* buffer, const Event& ready_event) override
+        void ReleaseReceiveBuffer(T* buffer, const Event& ready_event) override
         {
 #ifndef NDEBUG
             if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
@@ -320,8 +325,7 @@ namespace groute {
     {
     private:
         ISender<T>* m_sender;
-        std::deque  < std::shared_future< Event > > m_promised_events;
-        std::deque  < T* > m_promised_buffers; // The corresponding buffers depending on the events 
+        std::deque  < std::shared_future< PendingBuffer<T> > > m_promised_buffers;  
 
     public:
         PipelinedSender(Context& context, ISender<T>* sender, Endpoint endpoint, size_t chunk_size, size_t num_buffers) :
@@ -329,30 +333,24 @@ namespace groute {
         {
             for (size_t i = 0; i < this->m_endpoint_buffers.size(); ++i)
             {
-                m_promised_events.push_back(groute::completed_future(Event()));
-                m_promised_buffers.push_back(this->m_endpoint_buffers[i]);
+                m_promised_buffers.push_back(
+                    groute::completed_future(PendingBuffer<T>(this->m_endpoint_buffers[i], this->m_chunk_size, Event())));
             }
         }
 
-        PendingBuffer<T> GetPipelineSendBuffer() override
+        PendingBuffer<T> GetSendBuffer() override
         {
             if (m_promised_buffers.empty())
             {
-                printf("\n\nWarning: No pipeline buffers available (usage: GetPipelineSendBuffer -> PipelinedSend)\n\n");
+                printf("\n\nWarning: No pipeline buffers available (usage: GetSendBuffer -> PipelinedSend)\n\n");
                 throw std::exception("No pipeline buffers"); 
             }
-            assert(!m_promised_events.empty());
-    
-            auto fut = m_promised_events.front();
-            m_promised_events.pop_front();
 
-            auto buffer = m_promised_buffers.front();
+            auto fut = m_promised_buffers.front();
             m_promised_buffers.pop_front();
 
-            auto ev = fut.get(); // Block on event future 
-                                 // Note: assumes send buffers are handled by FIFO order in router, which is true unless segments have metadata attached
-
-            return PendingBuffer<T>(buffer, this->m_chunk_size, ev);
+            return fut.get(); // Block on future 
+            // Note: assumes send buffers are handled by FIFO order in router, which is true unless segments have metadata attached
         }
 
         void PipelinedSend(const Segment<T>& segment, const Event& ready_event) override
@@ -362,10 +360,19 @@ namespace groute {
             if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
                 throw std::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
-            auto fut = m_sender->Send(segment, ready_event);
+            auto event_fut = m_sender->Send(segment, ready_event);
 
-            m_promised_events.push_back(fut);
-            m_promised_buffers.push_back(buffer);
+            // Wrap the event future with a pending buffer future with deffered async.
+            // The lambda below will be called by the thread calling GetSendBuffer 
+            std::shared_future< PendingBuffer<T> > buffer_fut 
+                = std::async(std::launch::deferred, 
+                             [](std::shared_future<Event> fut, T* ptr, size_t size)
+                             {
+                                 auto ev = fut.get();
+                                 return PendingBuffer<T>(ptr, size, ev);
+                             }, event_fut, buffer, this->m_chunk_size);
+
+            m_promised_buffers.push_back(buffer_fut);
         }
 
         std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override

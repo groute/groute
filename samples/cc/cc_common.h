@@ -280,7 +280,7 @@ namespace cc
                 // Work atomic
                 problem.WorkAtomic(input_seg);
 
-                edges_in.ReleasePipelineReceiveBuffer(input_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                edges_in.ReleaseReceiveBuffer(input_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
                 input_fut = edges_in.PipelinedReceive();
 
                 problem.Compress();   
@@ -301,7 +301,7 @@ namespace cc
                 // Merge
                 problem.Merge(merge_seg);
 
-                reduction_in.ReleasePipelineReceiveBuffer(merge_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                reduction_in.ReleaseReceiveBuffer(merge_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
                 reduce_fut = reduction_in.PipelinedReceive();
             }
 

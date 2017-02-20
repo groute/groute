@@ -202,7 +202,7 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
                 SumKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (seg.GetSegmentPtr(), seg.GetSegmentSize(), dev_sums[i]);
 
-                receive_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
+                receive_links[i].ReleaseReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
             }
 
             stream.Sync();
@@ -312,7 +312,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
                 HistogramKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (seg.GetSegmentPtr(), seg.GetSegmentSize(), dev_bins[i]);
 
-                input_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
+                input_links[i].ReleaseReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
             }
 
             auto fut = reduction_in_links[i].PipelinedReceive();
@@ -332,7 +332,7 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
                 MergeBinsKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>
                     (dev_bins[i] + seg.GetSegmentOffset(), seg.GetSegmentPtr(), seg.GetSegmentSize());
 
-                reduction_in_links[i].ReleasePipelineReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
+                reduction_in_links[i].ReleaseReceiveBuffer(seg.GetSegmentPtr(), context.RecordEvent(i, stream.cuda_stream));
                 fut = reduction_in_links[i].PipelinedReceive();
             }
 

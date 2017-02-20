@@ -190,11 +190,13 @@ namespace groute {
     class Buffer
     {
     private:
-        T* const m_ptr;
-        const size_t m_size;
+        T* m_ptr;
+        size_t m_size;
 
     public:
         Buffer(T* ptr, size_t size) : m_ptr(ptr), m_size(size) { }
+        Buffer() : m_ptr(nullptr), m_size(0) { }
+
         T* GetPtr() const   { return m_ptr; }
         size_t GetSize() const    { return m_size; }
     };
