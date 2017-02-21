@@ -424,7 +424,7 @@ namespace groute {
         private:
             Router<T>& m_router;
             const Endpoint m_endpoint;
-            bool m_shutdown;
+            volatile bool m_shutdown;
     
         public:
             Sender(Router<T>& router, Endpoint endpoint) : 

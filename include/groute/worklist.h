@@ -668,6 +668,13 @@ namespace groute {
             return dev::Counter(m_counters + m_current_slot);
         }
 
+        template<typename T>
+        typename Worklist<T>::DeviceObjectType ToDeviceWorklist(T* data_ptr, uint32_t capacity) const
+        {
+            assert(m_current_slot >= 0 && m_current_slot < WS);
+            return dev::Worklist<T>(data_ptr, m_counters + m_current_slot, capacity);
+        }
+
         void ResetAsync(cudaStream_t stream)
         {
             m_current_slot = (m_current_slot + 1) % WS;
@@ -797,9 +804,9 @@ namespace groute {
             GROUTE_CUDA_CHECK(cudaFreeHost(m_host_start));
             GROUTE_CUDA_CHECK(cudaFreeHost(m_host_end));
             GROUTE_CUDA_CHECK(cudaFreeHost(m_host_alloc_end));
-        }        
-        
-        void GetBounds(uint32_t& start, uint32_t& end, uint32_t& size, const Stream& stream) const
+        }       
+
+        void GetRealBounds(uint32_t& start, uint32_t& end, const Stream& stream) const
         {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_start, m_start, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_end, m_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
@@ -819,7 +826,12 @@ namespace groute {
                 exit(1);
             }
 
-            m_max_usage = max(m_max_usage, end - start);
+            m_max_usage = std::max(m_max_usage, end - start);
+        }
+        
+        void GetBounds(uint32_t& start, uint32_t& end, uint32_t& size, const Stream& stream) const
+        {
+            GetRealBounds(start, end, stream);
 
             start = start % m_capacity;
             end = end % m_capacity;
@@ -844,6 +856,25 @@ namespace groute {
         }
     
     public:
+        
+        struct Bounds
+        {
+            uint32_t start, end;
+
+            Bounds(uint32_t start, uint32_t end) : start(start), end(end) { }
+            Bounds() : start(0), end(0) { }
+
+            int GetLength() const { return end - start; } // Works also if numbers over/under flow
+            Bounds Exclude(Bounds other) const { return Bounds(other.end, end); }
+        };
+
+        Bounds GetBounds(const Stream& stream)
+        {
+            Bounds bounds;
+            GetRealBounds(bounds.start, bounds.end, stream);
+            return bounds;
+        }
+
         DeviceObjectType DeviceObject() const
         {
             return dev::CircularWorklist<T>(m_data, m_start, m_end, m_alloc_end, m_capacity);
@@ -871,12 +902,29 @@ namespace groute {
             CircularWorklistPopItems <<<1, 1, 0, stream >>>(DeviceObject(), items);
         }
 
+        void PopItemsAsync(uint32_t items, const Stream& stream) const 
+        {
+            if (items == 0) return;
+
+            CircularWorklistPopItems <<<1, 1, 0, stream.cuda_stream >>>(DeviceObject(), items);
+        }
+
         int GetLength(const Stream& stream) const
         {
             uint32_t start, end, size;
             GetBounds(start, end, size, stream);
 
             return size;
+        }
+
+        int GetSpace(const Stream& stream) const
+        {
+            return m_capacity - GetLength(stream);
+        }
+
+        int GetSpace(Bounds bounds) const
+        {
+            return m_capacity - bounds.GetLength();
         }
         
         int GetAllocCount(const Stream& stream) const
@@ -916,12 +964,16 @@ namespace groute {
                 start, end, alloc_end, size, capacity);
         }
 
-        std::vector< Segment<T> > ToSegs(const Stream& stream)
+        std::vector< Segment<T> > GetSegs(Bounds bounds)
         {
-            std::vector< Segment<T> > segs;
+            uint32_t start = bounds.start, end = bounds.end, size = bounds.GetLength();
 
-            uint32_t start, end, size;
-            GetBounds(start, end, size, stream);
+            start = start % m_capacity;
+            end = end % m_capacity;
+
+            //size = end >= start ? end - start : (m_capacity - start + end); // normal and circular cases
+
+            std::vector< Segment<T> > segs;
 
             if (end > start) // normal case
             {
@@ -938,6 +990,11 @@ namespace groute {
             // else empty
 
             return segs;
+        }
+
+        std::vector< Segment<T> > ToSegs(const Stream& stream)
+        {
+            return GetSegs(GetBounds(stream));
         }
     };
 }

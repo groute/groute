@@ -173,7 +173,7 @@ namespace graphs {
                 {
                     for (size_t i = 0; i < m_work_counts.size(); i++)
                     {
-                        printf("%d, %llu, %d\n", m_endpoint, i, m_work_counts[i]);
+                        printf("%d, %llu, %d\n", (groute::Endpoint::identity_type)m_endpoint, i, m_work_counts[i]);
                     }
                 }
 
@@ -253,7 +253,7 @@ namespace graphs {
                         int remote_in = rwl_in->GetLength(stream);
                         int remote_out = rwl_out->GetLength(stream);
 
-                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", endpoint, global_prio, high_in, low_in, remote_in, remote_out);
+                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", (groute::Endpoint::identity_type)endpoint, global_prio, high_in, low_in, remote_in, remote_out);
                     }
 
                     if (FLAGS_count_work)
@@ -272,11 +272,20 @@ namespace graphs {
                         m_barrier_lifetime,
                         grid_dims, block_dims, stream
                         );
+
+                    // TODOs (DWL refactor):
+                    // General: hide router, pass workers + source endpoints, expose input links for sources
+                    // 1. Optimize pass loop and decouple from send loop (Done) 
+                    // 2. Use this thread for interacting with device signal and optimize send loop in DWLP
+                    // 3. Priority and callbacks, Fusion, etc.
+                    // 3. Cleanup and order
+                    // 4. Apps
+
                     stream.Sync();
 
                     if (FLAGS_verbose)
                     {
-                        printf("%d - done kernel, LWC: %d, HWC: %d\n", endpoint, *m_work_counters[LOW_COUNTER], *m_work_counters[HIGH_COUNTER]);
+                        printf("%d - done kernel, LWC: %d, HWC: %d\n", (groute::Endpoint::identity_type)endpoint, *m_work_counters[LOW_COUNTER], *m_work_counters[HIGH_COUNTER]);
                     }
 
                     // Wait until the signal has been processed by the sender thread
@@ -302,7 +311,7 @@ namespace graphs {
                             segs_size += seg.GetSegmentSize();
                         }
 
-                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", endpoint, segs_size, global_prio, dwl.GetCurrentPrio());
+                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", (groute::Endpoint::identity_type)endpoint, segs_size, global_prio, dwl.GetCurrentPrio());
                     }
 
                     if (global_prio < dwl.GetCurrentPrio()) // priority is up
