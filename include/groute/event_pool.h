@@ -146,10 +146,21 @@ namespace groute {
             );
         }
 
+        static Event Record(const Stream& stream)
+        {
+            return Record(stream.cuda_stream);
+        }
+
         void Wait(cudaStream_t stream) const
         {
             if (m_internal_event == nullptr) return; // dummy event
             m_internal_event->Wait(stream);
+        }
+
+        void Wait(const Stream& stream) const
+        {
+            if (m_internal_event == nullptr) return; // dummy event
+            m_internal_event->Wait(stream.cuda_stream);
         }
 
         void Sync() const
@@ -228,9 +239,10 @@ namespace groute {
     };
 
     /**
-    * @brief A simple helper class for aggregating events with some pre known count until setting a promise
+    * @brief Helper class for aggregating an event group with some preknown reporter count until setting an Event promise
+    * @note Used for managing send operations in the Router
     */
-    class AggregatedEventPromise
+    class EventGroupPromise
     {
     private:
         std::promise<Event> m_promise;
@@ -247,13 +259,13 @@ namespace groute {
         }
     
     public:
-        AggregatedEventPromise(int reporters_count = 0) : m_reporters_count(reporters_count)
+        EventGroupPromise(int reporters_count = 0) : m_reporters_count(reporters_count)
         {
             m_ev_group = std::make_shared<EventGroup>();
             m_shared_future = m_promise.get_future();
         }
     
-        ~AggregatedEventPromise()
+        ~EventGroupPromise()
         {
             assert(is_ready(m_shared_future));
         }
@@ -382,79 +394,10 @@ namespace groute {
                 }
             );
         }
-    };
 
-    enum StreamPriority
-    {
-        SP_Default, SP_High, SP_Low
-    };
-
-    class Stream
-    {
-    public:
-        cudaStream_t    cuda_stream;
-        cudaEvent_t     sync_event;
-
-        Stream(int physical_dev, StreamPriority priority = SP_Default)
+        Event Record(const Stream& stream)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
-            Init(priority);
-        }
-
-        Stream(StreamPriority priority = SP_Default)
-        {
-            Init(priority);
-        }
-
-        void Init(StreamPriority priority)
-        {
-            if (priority == SP_Default)
-            {
-                GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking));
-                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
-            }
-
-            else
-            {
-                int leastPriority, greatestPriority;
-                cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority); // range: [*greatestPriority, *leastPriority]
-
-                GROUTE_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, priority == SP_High ? greatestPriority : leastPriority));
-                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
-            }
-        }
-
-        Stream(const Stream& other) = delete;
-
-        Stream(Stream&& other) : cuda_stream(other.cuda_stream), sync_event(other.sync_event)
-        {
-            other.cuda_stream = nullptr;
-            other.sync_event = nullptr;
-        }
-
-        Stream& operator=(const Stream& other) = delete;
-
-        Stream& operator=(Stream&& other) 
-        {
-            this->cuda_stream = other.cuda_stream;
-            this->sync_event = other.sync_event;
-
-            other.cuda_stream = nullptr;
-            other.sync_event = nullptr;
-
-            return *this;
-        }
-
-        ~Stream()
-        {
-            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
-            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
-        }
-
-        void Sync() const
-        {
-            GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
-            GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
+            return Record(stream.cuda_stream);
         }
     };
 }

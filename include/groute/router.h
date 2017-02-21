@@ -147,7 +147,7 @@ namespace groute {
         class SendOperation
         {
         private:
-            std::shared_ptr<AggregatedEventPromise> m_aggregated_event;
+            std::shared_ptr<EventGroupPromise> m_group_promise;
             std::shared_ptr<EventGroup> m_ev_group;
 
             Endpoint m_src_endpoint;
@@ -158,16 +158,16 @@ namespace groute {
             size_t m_progress;
             mutable std::mutex m_mutex;
 
-            void Complete()
+            void Complete() const
             {
-                m_aggregated_event->Report(*m_ev_group);
+                m_group_promise->Report(*m_ev_group);
             }
 
         public:
             SendOperation(
-                std::shared_ptr<AggregatedEventPromise> agg_event,
+                std::shared_ptr<EventGroupPromise> group_promise,
                 Endpoint src_endpoint, const Segment<T>& src_segment, const Event& src_ready_event) :
-                m_aggregated_event(agg_event),
+                m_group_promise(group_promise),
                 m_src_endpoint(src_endpoint), m_src_segment(src_segment),
                 m_src_ready_event(src_ready_event), m_pos(0), m_progress(0)
             {
@@ -492,9 +492,9 @@ namespace groute {
                 }
             }
     
-            std::shared_ptr<AggregatedEventPromise> QueueSendOps(const Segment<T>& segment, const Event& ready_event)
+            std::shared_ptr<EventGroupPromise> QueueSendOps(const Segment<T>& segment, const Event& ready_event)
             {
-                auto agg_event = std::make_shared<AggregatedEventPromise>();  
+                auto group_promise = std::make_shared<EventGroupPromise>();  
     
                 Route route = m_router.m_policy->GetRoute(m_endpoint, m_router.m_router_dst, segment.metadata);
 #ifndef NDEBUG
@@ -503,29 +503,29 @@ namespace groute {
                 switch (route.strategy)
                 {
                 case Availability:
-                    agg_event->SetReportersCount(1);
-                    AvailabilityMultiplexing(segment, route, ready_event, agg_event);
+                    group_promise->SetReportersCount(1);
+                    AvailabilityMultiplexing(segment, route, ready_event, group_promise);
                     break;
     
                 case Priority:
-                    agg_event->SetReportersCount(1);
-                    PriorityMultiplexing(segment, route, ready_event, agg_event);
+                    group_promise->SetReportersCount(1);
+                    PriorityMultiplexing(segment, route, ready_event, group_promise);
                     break;
     
                 case Broadcast:
-                    agg_event->SetReportersCount((int)route.dst_endpoints.size());
-                    BroadcastMultiplexing(segment, route, ready_event, agg_event);
+                    group_promise->SetReportersCount((int)route.dst_endpoints.size());
+                    BroadcastMultiplexing(segment, route, ready_event, group_promise);
                     break;
                 }
     
-                return agg_event;
+                return group_promise;
             }
     
             // TODO: Refactor Multiplexer object
     
-            void AvailabilityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& agg_event)
+            void AvailabilityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<EventGroupPromise>& group_promise)
             {
-                auto send_op = std::make_shared< internal::SendOperation<T> >(agg_event, m_endpoint, segment, ready_event);
+                auto send_op = std::make_shared< internal::SendOperation<T> >(group_promise, m_endpoint, segment, ready_event);
     
                 for (auto dst_endpoint : route.dst_endpoints)
                 {
@@ -548,9 +548,9 @@ namespace groute {
                 }
             }
     
-            void PriorityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& agg_event)
+            void PriorityMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<EventGroupPromise>& group_promise)
             {
-                auto send_op = std::make_shared< internal::SendOperation<T> >(agg_event, m_endpoint, segment, ready_event);
+                auto send_op = std::make_shared< internal::SendOperation<T> >(group_promise, m_endpoint, segment, ready_event);
     
                 for (auto dst_endpoint : route.dst_endpoints) // go over receivers by priority  
                 {
@@ -563,12 +563,12 @@ namespace groute {
                 }
             }
     
-            void BroadcastMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<AggregatedEventPromise>& agg_event)
+            void BroadcastMultiplexing(const Segment<T>& segment, const Route& route, const Event& ready_event, const std::shared_ptr<EventGroupPromise>& group_promise)
             {
                 for (auto dst_endpoint : route.dst_endpoints)
                 {
                     // create a send_op per receiver (broadcasting)  
-                    auto send_op = std::make_shared< internal::SendOperation<T> >(agg_event, m_endpoint, segment, ready_event);
+                    auto send_op = std::make_shared< internal::SendOperation<T> >(group_promise, m_endpoint, segment, ready_event);
     
                     m_router.m_receivers.at(dst_endpoint)
                         ->QueueSendOp(send_op);

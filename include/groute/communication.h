@@ -325,7 +325,16 @@ namespace groute {
     {
     private:
         ISender<T>* m_sender;
-        std::deque  < std::shared_future< PendingBuffer<T> > > m_promised_buffers;  
+
+        struct BufferFuture
+        {
+            std::shared_future<Event> future;
+            T* ptr;
+
+            BufferFuture(std::shared_future< Event > future, T* ptr) : future(future), ptr(ptr) { }
+            BufferFuture() : future(), ptr(nullptr) { }
+        };
+        std::deque<BufferFuture> m_promised_buffers;  
 
     public:
         PipelinedSender(Context& context, ISender<T>* sender, Endpoint endpoint, size_t chunk_size, size_t num_buffers) :
@@ -334,7 +343,7 @@ namespace groute {
             for (size_t i = 0; i < this->m_endpoint_buffers.size(); ++i)
             {
                 m_promised_buffers.push_back(
-                    groute::completed_future(PendingBuffer<T>(this->m_endpoint_buffers[i], this->m_chunk_size, Event())));
+                    BufferFuture(groute::completed_future(Event()), this->m_endpoint_buffers[i]));
             }
         }
 
@@ -346,33 +355,22 @@ namespace groute {
                 throw std::exception("No pipeline buffers"); 
             }
 
-            auto fut = m_promised_buffers.front();
+            auto buff = m_promised_buffers.front();
             m_promised_buffers.pop_front();
 
-            return fut.get(); // Block on future 
+            return PendingBuffer<T>(buff.ptr, this->m_chunk_size, buff.future.get() /*block on event future*/);
             // Note: assumes send buffers are handled by FIFO order in router, which is true unless segments have metadata attached
         }
 
         void PipelinedSend(const Segment<T>& segment, const Event& ready_event) override
         {
-            T* buffer = segment.GetSegmentPtr();
+            T* ptr = segment.GetSegmentPtr();
 #ifndef NDEBUG
-            if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
+            if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), ptr) == this->m_endpoint_buffers.end())
                 throw std::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
             auto event_fut = m_sender->Send(segment, ready_event);
-
-            // Wrap the event future with a pending buffer future with deffered async.
-            // The lambda below will be called by the thread calling GetSendBuffer 
-            std::shared_future< PendingBuffer<T> > buffer_fut 
-                = std::async(std::launch::deferred, 
-                             [](std::shared_future<Event> fut, T* ptr, size_t size)
-                             {
-                                 auto ev = fut.get();
-                                 return PendingBuffer<T>(ptr, size, ev);
-                             }, event_fut, buffer, this->m_chunk_size);
-
-            m_promised_buffers.push_back(buffer_fut);
+            m_promised_buffers.push_back(BufferFuture(event_fut, ptr));
         }
 
         std::shared_future<Event> Send(const Segment<T>& segment, const Event& ready_event) override

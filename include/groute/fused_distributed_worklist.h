@@ -378,7 +378,7 @@ namespace groute {
 
                         auto pop = pops.front();
                         auto e = pop.future.get(); // Block on future 
-                        e.Wait(stream.cuda_stream); // Wait on event
+                        e.Wait(stream); // Wait on event
                         pop_count += pop.size;
                         pops.pop_front(); 
 
@@ -390,7 +390,7 @@ namespace groute {
                     seg.Wait(stream);
                     SplitReceive(seg, stream);
 
-                    auto ev = m_context.RecordEvent(m_endpoint, stream.cuda_stream);
+                    auto ev = m_context.RecordEvent(m_endpoint, stream);
 
                     { // Signal to worker
                         std::lock_guard<std::mutex> guard(m_receive_mutex);

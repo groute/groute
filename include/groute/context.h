@@ -326,6 +326,16 @@ namespace groute {
             return m_event_pools.at(current_physical_dev)->Record(stream);
         }
 
+        Event RecordEvent(Endpoint endpoint, const Stream& stream) const
+        {
+            return RecordEvent(endpoint, stream.cuda_stream);
+        }
+
+        Event RecordEvent(const Stream& stream) const
+        {
+            return RecordEvent(stream.cuda_stream);
+        }
+
         // -----------------
 
         void ReserveMemory(size_t membytes)
