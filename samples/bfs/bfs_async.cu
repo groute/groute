@@ -35,7 +35,7 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/fused_distributed_worklist.h>
+#include <groute/distributed_worklist.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>

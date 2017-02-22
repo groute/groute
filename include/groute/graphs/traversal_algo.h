@@ -40,7 +40,7 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/fused_distributed_worklist.h>
+#include <groute/distributed_worklist.h>
 #include <groute/graphs/csr_graph.h>
 
 #include <utils/parser.h>

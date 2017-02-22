@@ -37,7 +37,7 @@
 #include <cub/grid/grid_barrier.cuh>
 
 #include <groute/event_pool.h>
-#include <groute/fused_distributed_worklist.h>
+#include <groute/distributed_worklist.h>
 #include <groute/fused_worker.h>
 #include <groute/cta_work.h>
 
