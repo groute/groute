@@ -72,6 +72,8 @@ namespace graphs {
             };
             uint32_t *m_kernel_internal_counter;
 
+            Signal m_work_signal;
+
             Endpoint m_endpoint;
             std::vector<int> m_work_counts;
 
@@ -207,16 +209,16 @@ namespace graphs {
                 groute::CircularWorklist<TRemote>*  rwl_out = &peer->GetRemoteOutputWorklist();
                 groute::CircularWorklist<TLocal>*  rwl_in = &peer->GetLocalInputWorklist();
 
-                volatile int *send_signal_ptr;
                 volatile int *high_work_counter, *low_work_counter;
 
-                GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&send_signal_ptr, (int*)peer->GetSendSignalPtr(), 0));
                 GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&high_work_counter, (int*)m_work_counters[HIGH_COUNTER], 0));
                 GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&low_work_counter, (int*)m_work_counters[LOW_COUNTER], 0));
                 
                 dim3 grid_dims;
                 dim3 block_dims;
                 PersistenceKernelSizing(grid_dims, block_dims);
+
+                int prev_signal = m_work_signal.Peek();
 
                 if(m_problem.DoFusedInit(
                         lwl_high, lwl_low,
@@ -225,17 +227,25 @@ namespace graphs {
                         dwl.GetCurrentPrio(),
                         high_work_counter, low_work_counter,
                         m_kernel_internal_counter,
-                        send_signal_ptr,
+                        m_work_signal.GetDevPtr(),
                         m_barrier_lifetime,
                         grid_dims, block_dims, stream))
                 {
-                    // Sync
-                    stream.Sync();                 
-                    
-                    // Wait until the signal has been processed by the sender thread
-                    volatile int *host_send_signal = peer->GetSendSignalPtr();
-                    while (*host_send_signal != peer->GetLastSendSignal())
-                        std::this_thread::yield();
+                    stream.BeginSync();
+
+                    while (true) // Loop on work signals from the running kernel
+                    {
+                        int signal = m_work_signal.WaitForSignal(prev_signal, stream);
+                        if (signal == prev_signal) break; // Exit was signaled  
+
+                        int work = signal - prev_signal;
+                        dwl.ReportHighPrioWork(work, 0, "SplitSend", m_endpoint);
+
+                        prev_signal = signal; // Update
+                        peer->SendWork(); // Trigger work sending to router
+                    }
+
+                    stream.EndSync(); // Sync             
                     
                     // Some work was done by init, report it   
                     dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
@@ -268,7 +278,7 @@ namespace graphs {
                         global_prio,
                         high_work_counter, low_work_counter,
                         m_kernel_internal_counter,
-                        send_signal_ptr,
+                        m_work_signal.GetDevPtr(),
                         m_barrier_lifetime,
                         grid_dims, block_dims, stream
                         );
@@ -276,25 +286,35 @@ namespace graphs {
                     // TODOs (DWL refactor):
                     // General: hide router, pass workers + source endpoints, expose input links for sources
                     // 1. Optimize pass loop and decouple from send loop (Done) 
-                    // 2. Use this thread for interacting with device signal and optimize send loop in DWLP
+                    // 2. Use this thread for interacting with device signal and optimize send loop in DWLP (Done)
                     // 3. Priority and callbacks, Fusion, etc.
                     // 3. Cleanup and order
                     // 4. Apps
+                    
+                    stream.BeginSync();
 
-                    stream.Sync();
+                    while (true) // Loop on work signals from the running kernel
+                    {
+                        int signal = m_work_signal.WaitForSignal(prev_signal, stream);
+                        if (signal == prev_signal) break; // Exit was signaled  
+
+                        int work = signal - prev_signal;
+                        dwl.ReportHighPrioWork(work, 0, "SplitSend", m_endpoint);
+
+                        prev_signal = signal; // Update
+                        peer->SendWork(); // Trigger work sending to router
+                    }
+
+                    stream.EndSync(); // Sync             
+                    
+                    // Some work was done by the kernel, report it   
+                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
 
                     if (FLAGS_verbose)
                     {
                         printf("%d - done kernel, LWC: %d, HWC: %d\n", (groute::Endpoint::identity_type)endpoint, *m_work_counters[LOW_COUNTER], *m_work_counters[HIGH_COUNTER]);
                     }
-
-                    // Wait until the signal has been processed by the sender thread
-                    volatile int *host_send_signal = peer->GetSendSignalPtr();
-                    while (*host_send_signal != peer->GetLastSendSignal())
-                        std::this_thread::yield();
-
-                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
-                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
 
                     if (FLAGS_count_work)
                     {

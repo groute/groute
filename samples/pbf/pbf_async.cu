@@ -245,7 +245,7 @@ bool RunPBFConfiguration(int ngpus, const std::vector<T>& in, const std::vector<
                         groute::Router<T>& scatter,
                         groute::Router<T>& gather,
                         groute::internal::Barrier& barrier) {
-        groute::Stream stm(ctx.GetPhysicalDevice(endpoint));
+        groute::Stream stm = ctx.CreateStream(endpoint);
         groute::Link<T> link_in(scatter, endpoint, maxout, FLAGS_pipeline);
         groute::Link<T> link_out(endpoint, gather, maxout, FLAGS_pipeline);
 

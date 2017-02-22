@@ -125,7 +125,7 @@ namespace groute
                                   volatile int*     host_high_work_counter,
                                   volatile int*     host_low_work_counter,
                                   uint32_t*         g_work_size,
-                                  volatile int *    send_signal_ptr,
+                                  volatile int*     remote_work_signal,
                                   cub::GridBarrier  gbar,
                                   SplitOps          ops,
                                   WorkArgs...       args)
@@ -189,7 +189,7 @@ namespace groute
                 if (GTID == 0)
                 {
                     uint32_t remote_work_count = remote_out.get_alloc_count_and_sync();
-                    if (remote_work_count > 0) IncreaseHostFlag(send_signal_ptr, remote_work_count);
+                    if (remote_work_count > 0) IncreaseHostFlag(remote_work_signal, remote_work_count);
                 }
             }
 
@@ -209,18 +209,6 @@ namespace groute
             // Report work
             *host_high_work_counter = new_high_work - performed_high_work - prev_high_work;
             *host_low_work_counter = low_wl.len() - prev_low_work;
-        }
-    }
-
-    template <typename RemoteT>
-    __global__ void RemoteSignal(groute::dev::CircularWorklist<RemoteT> remote_out,
-                                 volatile int * send_signal_ptr)
-    {
-		// Transmit work
-        if (GTID == 0)
-        {
-            uint32_t remote_work_count = remote_out.get_alloc_count_and_sync();
-            if (remote_work_count > 0) IncreaseHostFlag(send_signal_ptr, remote_work_count);
         }
     }
 }

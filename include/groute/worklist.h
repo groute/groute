@@ -358,6 +358,34 @@ namespace groute {
                 return prev_start - *m_start;
             }
         };
+        
+        class Signal
+        {
+        public:
+            //volatile int *m_signal_ptr;
+
+            //__device__ __host__ Signal(volatile int *signal_ptr) : m_signal_ptr(signal_ptr) { }
+
+            //__device__ __forceinline__ void increase(int value)
+            //{
+            //    __threadfence_system();
+            //    *m_signal_ptr = *m_signal_ptr + value;
+            //}
+
+            static __device__ __forceinline__ void Increase(volatile int *signal_ptr, int value)
+            {
+                __threadfence_system();
+                *signal_ptr = *signal_ptr + value;
+            }
+
+            static __device__ __forceinline__ void Increment(volatile int *signal_ptr)
+            {
+                __threadfence_system();
+                *signal_ptr = *signal_ptr + 1;
+            }
+        };
+
+
 
         //
         // WorkSource classes (device):
@@ -995,6 +1023,58 @@ namespace groute {
         std::vector< Segment<T> > ToSegs(const Stream& stream)
         {
             return GetSegs(GetBounds(stream));
+        }
+    };
+
+    class Signal
+    {
+        volatile int * m_signal_host, * m_signal_dev;
+
+    public:
+        typedef dev::Signal DeviceObjectType;
+
+        Signal() 
+        {
+            GROUTE_CUDA_CHECK(cudaMallocHost(&m_signal_host, sizeof(int)));
+            GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&m_signal_dev, (int*)m_signal_host, 0));
+            *m_signal_host = 0;
+        }
+
+        ~Signal()
+        {
+            GROUTE_CUDA_CHECK(cudaFreeHost((void*)m_signal_host));
+        }
+
+        Signal(const Signal& other) = delete;
+        Signal(Signal&& other) = delete;
+
+        //DeviceObjectType DeviceObject() const
+        //{
+        //    return dev::Signal(m_signal_dev);
+        //}
+
+        volatile int * GetDevPtr() const { return m_signal_dev; }
+
+        int Peek() const { return *m_signal_host; }
+
+        int WaitForSignal(int prev_signal, Stream& stream)
+        {
+            int signal = *m_signal_host;
+
+            while (signal == prev_signal)
+            {
+                // Logic here depends on correct order in device code (increase -> exit)
+
+                std::this_thread::yield();
+                if (stream.Query()) // Means kernel is done
+                {
+                    signal = *m_signal_host; // Make sure to read any later signal as well
+                    break;
+                }
+
+                signal = *m_signal_host;
+            }
+            return signal;
         }
     };
 }

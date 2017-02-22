@@ -113,14 +113,14 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
     bool exit = false;
     groute::Event signal;
 
-    groute::Stream producer_stream(0);
+    groute::Stream producer_stream(0, groute::SP_Default);
     circular_worklist.ResetAsync(producer_stream.cuda_stream); // init 
 
     producer_stream.Sync(); // sync
 
     std::thread worker([&]()
     {
-        groute::Stream alternating_stream(0);
+        groute::Stream alternating_stream(0, groute::SP_Default);
 
         srand(static_cast <unsigned> (22422));
         int pos = 0;

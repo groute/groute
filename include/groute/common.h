@@ -301,19 +301,26 @@ namespace groute {
         cudaStream_t    cuda_stream;
         cudaEvent_t     sync_event;
 
-        Stream(int physical_dev, StreamPriority priority = SP_Default)
+        Stream(int physical_dev, StreamPriority priority) : cuda_stream(nullptr), sync_event(nullptr)
         {
             GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
             Init(priority);
         }
 
-        Stream(StreamPriority priority = SP_Default)
+        Stream(StreamPriority priority) : cuda_stream(nullptr), sync_event(nullptr)
         {
             Init(priority);
         }
 
+        Stream() : cuda_stream(nullptr), sync_event(nullptr)
+        {
+        }
+
         void Init(StreamPriority priority)
         {
+            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
+            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+
             if (priority == SP_Default)
             {
                 GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking));
@@ -342,8 +349,11 @@ namespace groute {
 
         Stream& operator=(Stream&& other) 
         {
-            this->cuda_stream = other.cuda_stream;
-            this->sync_event = other.sync_event;
+            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
+            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+
+            cuda_stream = other.cuda_stream;
+            sync_event = other.sync_event;
 
             other.cuda_stream = nullptr;
             other.sync_event = nullptr;
@@ -360,6 +370,21 @@ namespace groute {
         void Sync() const
         {
             GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
+            GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
+        }
+
+        void BeginSync() const
+        {
+            GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
+        }
+
+        bool Query()
+        {
+            return cudaEventQuery(sync_event) == cudaSuccess;
+        }
+
+        void EndSync() const
+        {
             GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
         }
     };
