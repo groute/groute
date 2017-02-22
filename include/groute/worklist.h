@@ -361,16 +361,16 @@ namespace groute {
         
         class Signal
         {
+            volatile int *m_signal_ptr;
         public:
-            //volatile int *m_signal_ptr;
 
-            //__device__ __host__ Signal(volatile int *signal_ptr) : m_signal_ptr(signal_ptr) { }
+            __device__ __host__ Signal(volatile int *signal_ptr) : m_signal_ptr(signal_ptr) { }
 
-            //__device__ __forceinline__ void increase(int value)
-            //{
-            //    __threadfence_system();
-            //    *m_signal_ptr = *m_signal_ptr + value;
-            //}
+            __device__ __forceinline__ void increase(int value)
+            {
+                __threadfence_system();
+                *m_signal_ptr = *m_signal_ptr + value;
+            }
 
             static __device__ __forceinline__ void Increase(volatile int *signal_ptr, int value)
             {
@@ -560,7 +560,12 @@ namespace groute {
         }
 
         Worklist(const Worklist& other) = delete;
-        Worklist(Worklist&& other) = delete;
+
+        Worklist(Worklist&& other)
+        {
+            *this = other;              // first copy all fields  
+            new (&other) Worklist(0);   // clear up other
+        }
 
     private:
         Worklist& operator=(const Worklist& other) = default;
@@ -1048,10 +1053,10 @@ namespace groute {
         Signal(const Signal& other) = delete;
         Signal(Signal&& other) = delete;
 
-        //DeviceObjectType DeviceObject() const
-        //{
-        //    return dev::Signal(m_signal_dev);
-        //}
+        DeviceObjectType DeviceObject() const
+        {
+            return dev::Signal(m_signal_dev);
+        }
 
         volatile int * GetDevPtr() const { return m_signal_dev; }
 
@@ -1063,8 +1068,6 @@ namespace groute {
 
             while (signal == prev_signal)
             {
-                // Logic here depends on correct order in device code (increase -> exit)
-
                 std::this_thread::yield();
                 if (stream.Query()) // Means kernel is done
                 {

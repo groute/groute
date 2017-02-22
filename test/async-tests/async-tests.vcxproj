@@ -216,7 +216,6 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\cta_work.h" />
     <ClInclude Include="..\..\include\groute\distributed_worklist.h" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h" />
     <ClInclude Include="..\..\include\groute\fused_worker.h" />
     <ClInclude Include="..\..\include\groute\graphs\common.h" />
     <ClInclude Include="..\..\include\groute\graphs\coo_graph.h" />

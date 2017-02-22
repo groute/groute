@@ -183,7 +183,6 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\context.h" />
     <ClInclude Include="..\..\include\groute\cta_work.h" />
     <ClInclude Include="..\..\include\groute\device_router.cuh" />
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
     <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h" />
     <ClInclude Include="..\..\include\groute\fused_worker.h" />
@@ -218,7 +217,12 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="bfs_async.cu" />
+    <CudaCompile Include="bfs_async.cu">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </CudaCompile>
     <CudaCompile Include="bfs_async_opt.cu" />
   </ItemGroup>
   <ItemGroup>

@@ -29,13 +29,7 @@
     <ClInclude Include="..\..\include\groute\cta_work.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\event_pool.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\link.h">
@@ -87,6 +81,9 @@
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
   </ItemGroup>

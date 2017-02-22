@@ -101,7 +101,7 @@ DEFINE_bool(high_priority_receive, true, "Use a high priority stream for split r
 
 DEFINE_bool(cta_np, true, "Use nested parallelism withing traversal kernels");
 
-DEFINE_double(wl_alloc_factor_local, 0.2, "Worklist allocation factor: local worklist");
+DEFINE_double(wl_alloc_factor_local, 0.2, "Worklist allocation factor: local worklist/s");
 DEFINE_double(wl_alloc_factor_in, 0.4, "Worklist allocation factor: incoming worklist");
 DEFINE_double(wl_alloc_factor_out, 0.2, "Worklist allocation factor: outgoing worklist");
 DEFINE_double(wl_alloc_factor_pass, 0.2, "Worklist allocation factor: pass-through worklist");

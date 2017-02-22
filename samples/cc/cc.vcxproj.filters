@@ -93,9 +93,6 @@
     <ClInclude Include="..\..\include\groute\cta_work.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\fused_worker.h">
       <Filter>groute</Filter>
     </ClInclude>

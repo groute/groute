@@ -74,132 +74,132 @@ namespace groute
     };
 
 
-    template <typename T, typename SplitOps, typename PrioT>
-    __device__ void SplitHighLow(SplitOps& ops, PrioT global_priority,
-                                 groute::dev::CircularWorklist<T>& remote_in,
+    template <typename T, typename DWCallbacks, typename TPrio>
+    __device__ void SplitDeferredWork(DWCallbacks& callbacks, TPrio priority_threshold,
+                                 dev::CircularWorklist<T>& remote_input,
                                  uint32_t work_size,
-                                 groute::dev::Worklist<T>& high_wl,
-                                 groute::dev::Worklist<T>& low_wl)
+                                 dev::Worklist<T>& immediate_worklist,
+                                 dev::Worklist<T>& deferred_worklist)
     {
         // ballot/warp-aggregated
         // Returns number of processed items
 
-        // Expecting a function in split ops with the following signature:  
-        //      bool is_high_prio(T work, PrioT global_prio)
+        // Expecting a function in callbacks with the following signature:  
+        //      bool is_high_prio(T work, TPrio priority_threshold)
 
         uint32_t tid = TID_1D;
         uint32_t nthreads = TOTAL_THREADS_1D;
 
         for (uint32_t i = 0 + tid; i < work_size; i += nthreads)
         {
-            T work = remote_in.read(i); // takes care of circularity  
+            T work = remote_input.read(i); // takes care of circularity  
 
-            bool is_high_prio = ops.is_high_prio(work, global_priority);
+            bool is_immediate_work = callbacks.is_high_prio(work, priority_threshold);
 
-            int high_mask = __ballot(is_high_prio ? 1 : 0);
-            int low_mask = __ballot(is_high_prio ? 0 : 1);
+            int immediate_mask = __ballot(is_immediate_work ? 1 : 0);
+            int deferred_mask = __ballot(is_immediate_work ? 0 : 1);
 
-            if (is_high_prio)
+            if (is_immediate_work)
             {
-                int high_leader = __ffs(high_mask) - 1;
-                int thread_offset = __popc(high_mask & ((1 << lane_id()) - 1));
-                high_wl.append_warp(work, high_leader, __popc(high_mask), thread_offset);
+                int high_leader = __ffs(immediate_mask) - 1;
+                int thread_offset = __popc(immediate_mask & ((1 << lane_id()) - 1));
+                immediate_worklist.append_warp(work, high_leader, __popc(immediate_mask), thread_offset);
             }
             else
             {
-                int low_leader = __ffs(low_mask) - 1;
-                int thread_offset = __popc(low_mask & ((1 << lane_id()) - 1));
-                low_wl.append_warp(work, low_leader, __popc(low_mask), thread_offset);
+                int low_leader = __ffs(deferred_mask) - 1;
+                int thread_offset = __popc(deferred_mask & ((1 << lane_id()) - 1));
+                deferred_worklist.append_warp(work, low_leader, __popc(deferred_mask), thread_offset);
             }
         }
     }
 
-    template <typename StoppingCondition, typename LocalT, typename RemoteT, typename PrioT,
-        typename SplitOps, typename Work, typename... WorkArgs>
-        __global__ void FusedWork(groute::dev::Worklist<LocalT>           high_wl,
-                                  groute::dev::Worklist<LocalT>           low_wl,
-                                  groute::dev::CircularWorklist<LocalT>   remote_in,
-                                  groute::dev::CircularWorklist<RemoteT>  remote_out,
+    template <typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
+        typename DWCallbacks, typename Work, typename... WorkArgs>
+        __global__ void FusedWork(dev::Worklist<TLocal>           immediate_worklist,
+                                  dev::Worklist<TLocal>           deferred_worklist,
+                                  dev::CircularWorklist<TLocal>   remote_input,
+                                  dev::CircularWorklist<TRemote>  remote_output,
                                   int               chunk_size,
-                                  PrioT             global_prio,
-                                  volatile int*     host_high_work_counter,
-                                  volatile int*     host_low_work_counter,
-                                  uint32_t*         g_work_size,
+                                  TPrio             priority_threshold,
+                                  volatile int*     host_current_work_counter,
+                                  volatile int*     host_deferred_work_counter,
+                                  uint32_t*         grid_work_size,
                                   volatile int*     remote_work_signal,
-                                  cub::GridBarrier  gbar,
-                                  SplitOps          ops,
+                                  cub::GridBarrier  grid_barrier,
+                                  DWCallbacks       callbacks,
                                   WorkArgs...       args)
     {
         // Keep one SM free (use N-1 blocks where N is the number of SMs)
         StoppingCondition cond;
 
         // Message transmission variables
-        int new_high_work = 0, performed_high_work = 0;
+        int new_immediate_work = 0, performed_immediate_work = 0;
         uint32_t prev_start;
 
-        int prev_low_work, prev_high_work;
+        int prev_deferred_work, prev_immediate_work;
         if (GTID == 0)
         {
-            prev_low_work = low_wl.len();
-            prev_high_work = high_wl.len();
+            prev_deferred_work = deferred_worklist.len();
+            prev_immediate_work = immediate_worklist.len();
         }
 
         while (!cond.stop())
         {
             if (GTID == 0)
             {
-                *g_work_size = remote_in.size(); // we must decide on work size globally  
+                *grid_work_size = remote_input.size(); // we must decide on work size globally  
             }
 
-            gbar.Sync();
+            grid_barrier.Sync();
 
-            uint32_t work_size = *g_work_size; //  broadcast to all threads   
-            SplitHighLow<LocalT, SplitOps>(ops, global_prio, remote_in, work_size, high_wl, low_wl);
+            uint32_t work_size = *grid_work_size; //  broadcast to all threads   
+            SplitDeferredWork<TLocal, DWCallbacks>(callbacks, priority_threshold, remote_input, work_size, immediate_worklist, deferred_worklist);
 
-            gbar.Sync();
+            grid_barrier.Sync();
 
             if (GTID == 0)
             {
-                new_high_work += (int)high_wl.len();
-                performed_high_work += (int)work_size;
+                new_immediate_work += (int)immediate_worklist.len();
+                performed_immediate_work += (int)work_size;
 
-                remote_in.pop_items(work_size);
-                prev_start = remote_in.get_start();
+                remote_input.pop_items(work_size);
+                prev_start = remote_input.get_start();
             }
 
-            if (high_wl.len() == 0)
+            if (immediate_worklist.len() == 0)
                 break;
 
-            // This work also fills remote_in
-            for (int chunk = 0; chunk < high_wl.len(); chunk += chunk_size)
+            // This work also fills remote_input
+            for (int chunk = 0; chunk < immediate_worklist.len(); chunk += chunk_size)
             {
-                gbar.Sync();
+                grid_barrier.Sync();
 
                 // Perform work chunk
-                int cur_chunk = min(high_wl.len() - chunk, chunk_size);
-                Work::work(groute::dev::WorkSourceArray<LocalT>(high_wl.m_data + chunk, cur_chunk),
-                    remote_in,  // prepending local work here 
-                    remote_out, // appending remote work here
+                int cur_chunk = min(immediate_worklist.len() - chunk, chunk_size);
+                Work::work(groute::dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
+                    remote_input,  // prepending local work here 
+                    remote_output, // appending remote work here
                     args...
                     );
 
-                gbar.Sync();
+                grid_barrier.Sync();
 
                 // Transmit work
                 if (GTID == 0)
                 {
-                    uint32_t remote_work_count = remote_out.get_alloc_count_and_sync();
-                    if (remote_work_count > 0) IncreaseHostFlag(remote_work_signal, remote_work_count);
+                    uint32_t remote_work_count = remote_output.get_alloc_count_and_sync();
+                    if (remote_work_count > 0) dev::Signal::Increase(remote_work_signal, remote_work_count);
                 }
             }
 
             // Count total performed work
             if (GTID == 0)
             {
-                new_high_work += remote_in.get_start_diff(prev_start);
-                performed_high_work += high_wl.len();
+                new_immediate_work += remote_input.get_start_diff(prev_start);
+                performed_immediate_work += immediate_worklist.len();
 
-                high_wl.reset();
+                immediate_worklist.reset();
             }
         }
 
@@ -207,8 +207,8 @@ namespace groute
         {
             __threadfence();
             // Report work
-            *host_high_work_counter = new_high_work - performed_high_work - prev_high_work;
-            *host_low_work_counter = low_wl.len() - prev_low_work;
+            *host_current_work_counter = new_immediate_work - performed_immediate_work - prev_immediate_work;
+            *host_deferred_work_counter = deferred_worklist.len() - prev_deferred_work;
         }
     }
 }

@@ -39,7 +39,7 @@
 #include <utils/app_skeleton.h>
 
 #include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
+#include <groute/fused_distributed_worklist.h>
 
 #include <utils/cuda_utils.h>
 
@@ -99,7 +99,7 @@ struct Splitter
 
 namespace histogram
 {
-    struct SplitOps
+    struct DWCallbacks
     {
         __device__ __forceinline__ groute::SplitFlags on_receive(int work)
         {
@@ -125,7 +125,7 @@ namespace histogram
             return work;
         }
         
-        __device__ __host__ SplitOps(int split_seg_index, int split_seg_size)
+        __device__ __host__ DWCallbacks(int split_seg_index, int split_seg_size)
             : m_seg_index(split_seg_index), m_seg_size(split_seg_size)
         {
         }
@@ -177,9 +177,9 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     groute::Router<int> exchange_router(context, groute::Policy::CreateRingPolicy(ngpus), ngpus, ngpus);
     
-    groute::DistributedWorklist<int, int> distributed_worklist(context, exchange_router, ngpus);
+    groute::DistributedWorklist<int, int, histogram::DWCallbacks> distributed_worklist(context, exchange_router, ngpus, 0);
 
-    std::vector< std::unique_ptr< groute::IDistributedWorklistPeer<int, int> > > worklist_peers;
+    std::vector< std::shared_ptr< groute::IDistributedWorklistPeer<int, int> > > worklist_peers;
     std::vector< std::thread > dev_threads;
 
     std::vector<int*> dev_segs(ngpus);
@@ -192,8 +192,10 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
         CUASSERT_NOERR(cudaMemset(dev_segs[i], 0, histo_seg_size * sizeof(int)));
 
         worklist_peers.push_back(
-            distributed_worklist.CreatePeer(i, histogram::SplitOps(i, histo_seg_size), max_work_size, max_exch_size, num_exch_buffs));
+            distributed_worklist.CreatePeer(i, histogram::DWCallbacks(i, histo_seg_size), max_exch_size, num_exch_buffs, 0));
     }
+
+    distributed_worklist.InitPeers();
 
     std::vector<std::thread> workers;
     groute::internal::Barrier barrier(ngpus);
@@ -210,7 +212,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             auto input_fut = receiver_links[i].PipelinedReceive();
             auto input_seg = input_fut.get();
 
-            distributed_worklist.ReportWork(input_seg.GetSegmentSize());
+            distributed_worklist.ReportWork(input_seg.GetSegmentSize(), 0, "", i, true);
 
             barrier.Sync();
 
@@ -225,7 +227,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
             while (true)
             {
-                auto input_segs = worklist_peer->GetLocalWork(stream);
+                auto input_segs = worklist_peer->WaitForLocalWork(stream);
                 size_t total_segs_size = 0;
 
                 if (input_segs.empty()) break;
@@ -243,7 +245,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
                 }
                 
                 // report work
-                distributed_worklist.ReportWork(- (int)total_segs_size);
+                distributed_worklist.ReportWork(0, (int)total_segs_size, "", i);
             }
 
             stream.Sync();

@@ -58,9 +58,6 @@
     <ClInclude Include="..\..\include\utils\markers.h">
       <Filter>utils</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\graphs\common.h">
       <Filter>groute\graphs</Filter>
     </ClInclude>

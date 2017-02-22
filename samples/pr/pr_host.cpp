@@ -176,7 +176,7 @@ int PageRankCheckErrors(std::vector<rank_t>& ranks, std::vector<rank_t>& regress
 
     bool res = !((num_diffs+node_diffs) > 0 || mean_diff > 1e-2);
     if (!res || FLAGS_verbose)
-        printf("\nSUMMARY: %d/%d large differences, %d/%d node diffs, total mean diff: %f\n\n", num_diffs, (int)top, node_diffs, (int)top, mean_diff);
+        printf("\nSummary: %d/%d large differences, %d/%d node diffs, total mean diff: %f\n\n", num_diffs, (int)top, node_diffs, (int)top, mean_diff);
 
     return res ? 0 : num_diffs;
 }

@@ -80,7 +80,7 @@ namespace sssp {
         template<
             typename TGraph,
             typename TWeightDatum, typename TDistanceDatum>
-        struct SSSPWorkNP
+        struct SSSPWorkCTA
         {
             template<typename WorkSource>
             __device__ static void work(
@@ -118,9 +118,7 @@ namespace sssp {
 
                             if (distance + weight < atomicMin(node_distances.get_item_ptr(dest), distance + weight))
                             {
-                                int is_owned = graph.owns(dest);
-
-                                // TODO: move ballot logic to a device structure   
+                                int is_owned = graph.owns(dest); 
                                 
                                 int owned_mask = __ballot(is_owned ? 1 : 0);
                                 int remote_mask = __ballot(is_owned ? 0 : 1);
@@ -177,8 +175,6 @@ namespace sssp {
                         {
                             int is_owned = graph.owns(dest);
 
-                            // TODO: move ballot logic to a device structure 
-
                             int owned_mask = __ballot(is_owned ? 1 : 0);
                             int remote_mask = __ballot(is_owned ? 0 : 1);
 
@@ -200,7 +196,7 @@ namespace sssp {
             }
         };
 
-        struct SplitOps
+        struct DWCallbacks
         {
         private:
             groute::graphs::dev::CSRGraphSeg m_graph_seg;
@@ -208,7 +204,7 @@ namespace sssp {
 
         public:
             template<typename...UnusedData>
-            SplitOps(
+            DWCallbacks(
                 const groute::graphs::dev::CSRGraphSeg& graph_seg,
                 const groute::graphs::dev::GraphDatumSeg<distance_t>& weights_datum,
                 const groute::graphs::dev::GraphDatum<distance_t>& distances_datum,
@@ -217,16 +213,16 @@ namespace sssp {
             {
             }
 
-            __device__ __forceinline__ groute::opt::SplitFlags on_receive(const remote_work_t& work)
+            __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
             {
                 if (m_graph_seg.owns(work.node))
                 {
                     return (work.distance < atomicMin(m_distances_datum.get_item_ptr(work.node), work.distance))
-                        ? groute::opt::SF_Take
-                        : groute::opt::SF_None; // filter
+                        ? groute::SF_Take
+                        : groute::SF_None; // filter
                 }
 
-                return groute::opt::SF_Pass;
+                return groute::SF_Pass;
             }
 
             __device__ __forceinline__ bool is_high_prio(const local_work_t& work, const distance_t& global_prio)
@@ -234,11 +230,11 @@ namespace sssp {
                 return m_distances_datum[work] <= global_prio;
             }
 
-            __device__ __forceinline__ groute::opt::SplitFlags on_send(local_work_t work)
+            __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)
             {
                 return (m_graph_seg.owns(work))
-                    ? groute::opt::SF_Take
-                    : groute::opt::SF_Pass;
+                    ? groute::SF_Take
+                    : groute::SF_Pass;
             }
 
             __device__ __forceinline__ remote_work_t pack(local_work_t work)
@@ -263,7 +259,7 @@ namespace sssp {
             TDistanceDatum<distance_t> m_distances_datum;
 
             typedef SSSPWork<TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t>> WorkType;
-            typedef SSSPWorkNP<TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t>> WorkTypeNP;
+            typedef SSSPWorkCTA<TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t>> WorkTypeCTA;
 
         public:
             FusedProblem(const TGraph& graph, const TWeightDatum<distance_t>& weights_datum, const TDistanceDatum<distance_t>& distances_datum) :
@@ -305,8 +301,8 @@ namespace sssp {
                     if (FLAGS_cta_np)
                     {
                         groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, distance_t, SplitOps,
-                            WorkTypeNP,
+                            groute::NeverStop, local_work_t, remote_work_t, distance_t, DWCallbacks,
+                            WorkTypeCTA,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
 
                             << < grid_dims, block_dims, 0, stream.cuda_stream >> > (
@@ -317,14 +313,14 @@ namespace sssp {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            sssp::opt::SplitOps(m_graph, m_weights_datum, m_distances_datum),
+                            sssp::opt::DWCallbacks(m_graph, m_weights_datum, m_distances_datum),
                             m_graph, m_weights_datum, m_distances_datum
                             );
                     }
                     else
                     {
                         groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, distance_t, SplitOps,
+                            groute::NeverStop, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkType,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
 
@@ -336,7 +332,7 @@ namespace sssp {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            sssp::opt::SplitOps(m_graph, m_weights_datum, m_distances_datum),
+                            sssp::opt::DWCallbacks(m_graph, m_weights_datum, m_distances_datum),
                             m_graph, m_weights_datum, m_distances_datum
                             );
                     }
@@ -347,8 +343,8 @@ namespace sssp {
                     if (FLAGS_cta_np)
                     {
                         groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, SplitOps,
-                            WorkTypeNP,
+                            groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, DWCallbacks,
+                            WorkTypeCTA,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
 
                             << < grid_dims, block_dims, 0, stream.cuda_stream >> > (
@@ -359,14 +355,14 @@ namespace sssp {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            sssp::opt::SplitOps(m_graph, m_weights_datum, m_distances_datum),
+                            sssp::opt::DWCallbacks(m_graph, m_weights_datum, m_distances_datum),
                             m_graph, m_weights_datum, m_distances_datum
                             );
                     }
                     else
                     {
                         groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, SplitOps,
+                            groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkType,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
 
@@ -378,7 +374,7 @@ namespace sssp {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            sssp::opt::SplitOps(m_graph, m_weights_datum, m_distances_datum),
+                            sssp::opt::DWCallbacks(m_graph, m_weights_datum, m_distances_datum),
                             m_graph, m_weights_datum, m_distances_datum
                             );
                     }
@@ -395,7 +391,7 @@ namespace sssp {
                 groute::graphs::traversal::Context<sssp::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
                 groute::Link<remote_work_t>& input_link,
-                groute::opt::DistributedWorklist<local_work_t, remote_work_t, SplitOps>& distributed_worklist)
+                groute::DistributedWorklist<local_work_t, remote_work_t, DWCallbacks>& distributed_worklist)
             {
                 index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
@@ -406,7 +402,7 @@ namespace sssp {
                 }
 
                 // report the initial work
-                distributed_worklist.ReportHighPrioWork(1, 0, "Host", groute::Endpoint::HostEndpoint(0), true);
+                distributed_worklist.ReportWork(1, 0, "Host", groute::Endpoint::HostEndpoint(0), true);
 
                 std::vector<remote_work_t> initial_work;
                 initial_work.push_back(remote_work_t(source_node, 0));
@@ -456,14 +452,14 @@ bool TestSSSPAsyncMultiOptimized(int ngpus)
     typedef groute::graphs::traversal::FusedSolver<
         sssp::opt::Algo, ProblemType, 
         sssp::opt::local_work_t , sssp::opt::remote_work_t, distance_t, 
-        sssp::opt::SplitOps, 
+        sssp::opt::DWCallbacks, 
         groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatumSeg<distance_t>, groute::graphs::dev::GraphDatum<distance_t>> SolverType;
 
-    groute::graphs::traversal::__MultiRunner__Opt__ <
+    groute::graphs::traversal::__MultiRunner__ <
         sssp::opt::Algo,
         ProblemType,
         SolverType,
-        sssp::opt::SplitOps,
+        sssp::opt::DWCallbacks,
         sssp::opt::local_work_t,
         sssp::opt::remote_work_t,
         groute::graphs::multi::EdgeInputDatum<distance_t>,
@@ -472,5 +468,5 @@ bool TestSSSPAsyncMultiOptimized(int ngpus)
     groute::graphs::multi::EdgeInputDatum<distance_t> edge_weights;
     groute::graphs::multi::NodeOutputGlobalDatum<distance_t> node_distances;
     
-    return runner(ngpus, edge_weights, node_distances);
+    return runner(ngpus, 2, edge_weights, node_distances);
 }

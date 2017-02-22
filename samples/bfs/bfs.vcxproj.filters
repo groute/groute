@@ -48,9 +48,6 @@
     <ClInclude Include="..\..\include\groute\memcpy.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="bfs_common.h" />
     <ClInclude Include="..\..\include\groute\device_router.cuh">
       <Filter>groute</Filter>
@@ -60,9 +57,6 @@
     </ClInclude>
     <ClInclude Include="..\..\include\utils\markers.h">
       <Filter>utils</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
-      <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\graphs\common.h">
       <Filter>groute\graphs</Filter>
@@ -104,6 +98,9 @@
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
   </ItemGroup>

@@ -72,7 +72,7 @@ namespace pr {
             typename TGraph,
             typename RankDatum,
             typename ResidualDatum>
-        struct PageRankWorkNP
+        struct PageRankWorkCTA
         {
             template<typename WorkSource>
             __device__ static void work(
@@ -264,7 +264,7 @@ namespace pr {
             if (GTID == 0)
             {
                 uint32_t remote_work_count = rwl_out.get_alloc_count_and_sync();
-                if (remote_work_count > 0) IncreaseHostFlag(send_signal_ptr, remote_work_count);
+                if (remote_work_count > 0) groute::dev::Signal::Increase(send_signal_ptr, remote_work_count);
 
                 prev_start = rwl_in.get_start();
             }
@@ -287,7 +287,7 @@ namespace pr {
             if (GTID == 0)
             {
                 uint32_t remote_work_count = rwl_out.get_alloc_count_and_sync();
-                if (remote_work_count > 0) IncreaseHostFlag(send_signal_ptr, remote_work_count);
+                if (remote_work_count > 0) groute::dev::Signal::Increase(send_signal_ptr, remote_work_count);
 
                 __threadfence();
                 // Report work
@@ -297,7 +297,7 @@ namespace pr {
         }
 
 
-        struct SplitOps
+        struct DWCallbacks
         {
         private:
             groute::graphs::dev::CSRGraphSeg m_graph_seg;
@@ -305,7 +305,7 @@ namespace pr {
 
         public:
             template<typename...UnusedData>
-            SplitOps(
+            DWCallbacks(
                 const groute::graphs::dev::CSRGraphSeg& graph_seg,
                 const groute::graphs::dev::GraphDatum<rank_t>& residual,
                 const groute::graphs::dev::GraphDatumSeg<rank_t>& current_ranks,
@@ -316,7 +316,7 @@ namespace pr {
             {
             }
 
-            SplitOps(
+            DWCallbacks(
                 const groute::graphs::dev::CSRGraphSeg& graph_seg,
                 const groute::graphs::dev::GraphDatum<rank_t>& residual)
                 :
@@ -325,17 +325,17 @@ namespace pr {
             {
             }
 
-            __device__ __forceinline__ groute::opt::SplitFlags on_receive(const remote_work_t& work)
+            __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
             {
                 if (m_graph_seg.owns(work.node))
                 {
                     rank_t prev = atomicAdd(m_residual.get_item_ptr(work.node), work.rank);
                     return (prev + work.rank > EPSILON && prev < EPSILON)
-                        ? groute::opt::SF_Take
-                        : groute::opt::SF_None;
+                        ? groute::SF_Take
+                        : groute::SF_None;
                 }
 
-                return groute::opt::SF_Pass;
+                return groute::SF_Pass;
             }
 
             __device__ __forceinline__ bool is_high_prio(const local_work_t& work, const rank_t& global_prio)
@@ -343,11 +343,11 @@ namespace pr {
                 return true; // NOTE: Can soft-priority be supported for PR?
             }
 
-            __device__ __forceinline__ groute::opt::SplitFlags on_send(local_work_t work)
+            __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)
             {
                 return (m_graph_seg.owns(work))
-                    ? groute::opt::SF_Take
-                    : groute::opt::SF_Pass;
+                    ? groute::SF_Take
+                    : groute::SF_Pass;
             }
 
             __device__ __forceinline__ remote_work_t pack(local_work_t work)
@@ -374,7 +374,7 @@ namespace pr {
             RankDatum<rank_t> m_current_ranks;
 
             typedef PageRankWork<TGraph, RankDatum<rank_t>, ResidualDatum<rank_t>> WorkType;
-            typedef PageRankWorkNP<TGraph, RankDatum<rank_t>, ResidualDatum<rank_t>> WorkTypeNP;
+            typedef PageRankWorkCTA<TGraph, RankDatum<rank_t>, ResidualDatum<rank_t>> WorkTypeCTA;
 
             FusedProblem(
                 const TGraph& graph,
@@ -426,8 +426,8 @@ namespace pr {
                     if (FLAGS_cta_np)
                     {
                         groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, rank_t, SplitOps,
-                            WorkTypeNP,
+                            groute::NeverStop, local_work_t, remote_work_t, rank_t, DWCallbacks,
+                            WorkTypeCTA,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
 
                             << < grid_dims, block_dims, 0, stream.cuda_stream >> > (
@@ -438,14 +438,14 @@ namespace pr {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            pr::opt::SplitOps(m_graph, m_residual),
+                            pr::opt::DWCallbacks(m_graph, m_residual),
                             m_graph, m_current_ranks, m_residual
                             );
                     }
                     else
                     {
                         groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, rank_t, SplitOps,
+                            groute::NeverStop, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkType,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
 
@@ -457,7 +457,7 @@ namespace pr {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            pr::opt::SplitOps(m_graph, m_residual),
+                            pr::opt::DWCallbacks(m_graph, m_residual),
                             m_graph, m_current_ranks, m_residual
                             );
                     }
@@ -468,8 +468,8 @@ namespace pr {
                     if (FLAGS_cta_np)
                     {
                         groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, SplitOps,
-                            WorkTypeNP,
+                            groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, DWCallbacks,
+                            WorkTypeCTA,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
 
                             << < grid_dims, block_dims, 0, stream.cuda_stream >> > (
@@ -480,14 +480,14 @@ namespace pr {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            pr::opt::SplitOps(m_graph, m_residual),
+                            pr::opt::DWCallbacks(m_graph, m_residual),
                             m_graph, m_current_ranks, m_residual
                             );
                     }
                     else
                     {
                         groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, SplitOps,
+                            groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkType,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
 
@@ -499,7 +499,7 @@ namespace pr {
                             high_work_counter, low_work_counter,
                             kernel_internal_counter, send_signal_ptr,
                             barrier_lifetime,
-                            pr::opt::SplitOps(m_graph, m_residual),
+                            pr::opt::DWCallbacks(m_graph, m_residual),
                             m_graph, m_current_ranks, m_residual
                             );
                     }
@@ -516,9 +516,9 @@ namespace pr {
                 groute::graphs::traversal::Context<pr::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
                 groute::Link<remote_work_t>& input_link,
-                groute::opt::DistributedWorklist<local_work_t, remote_work_t, SplitOps>& distributed_worklist)
+                groute::DistributedWorklist<local_work_t, remote_work_t, DWCallbacks>& distributed_worklist)
             {
-                distributed_worklist.ReportHighPrioWork(context.host_graph.nnodes, 0, "Host", groute::Endpoint::HostEndpoint(0), true); // PR starts with all nodes
+                distributed_worklist.ReportWork(context.host_graph.nnodes, 0, Name(), groute::Endpoint::HostEndpoint(0), true); // PR starts with all nodes
             }
 
             template<
@@ -570,14 +570,14 @@ bool TestPageRankAsyncMultiOptimized(int ngpus)
     typedef groute::graphs::traversal::FusedSolver<
         pr::opt::Algo, ProblemType, 
         pr::opt::local_work_t , pr::opt::remote_work_t, rank_t, 
-        pr::opt::SplitOps, 
+        pr::opt::DWCallbacks, 
         groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatumSeg<rank_t>, groute::graphs::dev::GraphDatum<rank_t>> SolverType;
     
-    groute::graphs::traversal::__MultiRunner__Opt__ <
+    groute::graphs::traversal::__MultiRunner__ <
         pr::opt::Algo,
         ProblemType,
         SolverType,
-        pr::opt::SplitOps,
+        pr::opt::DWCallbacks,
         pr::opt::local_work_t,
         pr::opt::remote_work_t,
         ResidualDatum, RankDatum > runner;
@@ -585,5 +585,5 @@ bool TestPageRankAsyncMultiOptimized(int ngpus)
     ResidualDatum residual;
     RankDatum current_ranks;
     
-    return runner(ngpus, residual, current_ranks);
+    return runner(ngpus, 2, residual, current_ranks);
 }

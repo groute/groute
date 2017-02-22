@@ -55,14 +55,8 @@ namespace graphs {
             ProblemType& m_problem;
             cub::GridBarrierLifetime m_barrier_lifetime;
 
-            groute::Worklist<TLocal> m_worklist_a;
-            groute::Worklist<TLocal> m_worklist_b;
-
             dim3 m_grid_dims;
-            enum
-            {
-                BlockSize = 256
-            };
+            enum { BlockSize = 256 };
 
             volatile int* m_work_counters[2];
             enum
@@ -71,7 +65,6 @@ namespace graphs {
                 LOW_COUNTER
             };
             uint32_t *m_kernel_internal_counter;
-
             Signal m_work_signal;
 
             Endpoint m_endpoint;
@@ -80,18 +73,6 @@ namespace graphs {
         public:
             FusedSolver(Context<Algo>& context, ProblemType& problem) : m_problem(problem), m_endpoint()
             {
-                void* mem_buffer;
-                size_t mem_size;
-                
-                // groute::opt::DistributedWorklistPeer allocates 0.3 + 0.15 + 0.15
-                // so here below we use the remaining 0.2 + 0.2  
-
-                mem_buffer = context.Alloc(0.2, mem_size);
-                m_worklist_a = groute::Worklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal));
-                
-                mem_buffer = context.Alloc(0.2, mem_size);
-                m_worklist_b = groute::Worklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal));
-
                 GROUTE_CUDA_CHECK(cudaMallocHost(&m_work_counters[HIGH_COUNTER], sizeof(int)));
                 GROUTE_CUDA_CHECK(cudaMallocHost(&m_work_counters[LOW_COUNTER], sizeof(int)));
 
@@ -118,7 +99,7 @@ namespace graphs {
                             groute::FusedWork 
                             < groute::NeverStop, TLocal, 
                               TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkTypeNP, WorkArgs... >,
+                              typename ProblemType::WorkTypeCTA, WorkArgs... >,
                             BlockSize, 0);
                     }
                     else
@@ -141,7 +122,7 @@ namespace graphs {
                             groute::FusedWork 
                             < groute::RunNTimes<1>, TLocal, 
                               TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkTypeNP, WorkArgs... >,
+                              typename ProblemType::WorkTypeCTA, WorkArgs... >,
                             BlockSize, 0);
                     }
                     else
@@ -194,25 +175,22 @@ namespace graphs {
             void Solve(
                 groute::Context& context,
                 groute::Endpoint endpoint,
-                groute::opt::DistributedWorklist<TLocal, TRemote, SplitOps>& dwl,
-                groute::opt::IDistributedWorklistPeer<TLocal, TRemote>* peer,
+                groute::DistributedWorklist<TLocal, TRemote, SplitOps>& dwl,
+                groute::IDistributedWorklistPeer<TLocal, TRemote>* peer,
                 groute::Stream& stream)
             {
                 m_endpoint = endpoint;
 
-                m_worklist_a.ResetAsync(stream.cuda_stream);
-                m_worklist_b.ResetAsync(stream.cuda_stream);
+                groute::Worklist<TLocal>* immediate_worklist = &peer->GetLocalWorkspace(0);
+                groute::Worklist<TLocal>* deferred_worklist = &peer->GetLocalWorkspace(0);
 
-                groute::Worklist<TLocal>* lwl_high = &m_worklist_a;
-                groute::Worklist<TLocal>* lwl_low = &m_worklist_b;
+                groute::CircularWorklist<TRemote>*  remote_output = &peer->GetRemoteOutputWorklist();
+                groute::CircularWorklist<TLocal>*  remote_input = &peer->GetLocalInputWorklist();
 
-                groute::CircularWorklist<TRemote>*  rwl_out = &peer->GetRemoteOutputWorklist();
-                groute::CircularWorklist<TLocal>*  rwl_in = &peer->GetLocalInputWorklist();
+                volatile int *immediate_work_counter, *deferred_work_counter;
 
-                volatile int *high_work_counter, *low_work_counter;
-
-                GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&high_work_counter, (int*)m_work_counters[HIGH_COUNTER], 0));
-                GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&low_work_counter, (int*)m_work_counters[LOW_COUNTER], 0));
+                GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&immediate_work_counter, (int*)m_work_counters[HIGH_COUNTER], 0));
+                GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&deferred_work_counter, (int*)m_work_counters[LOW_COUNTER], 0));
                 
                 dim3 grid_dims;
                 dim3 block_dims;
@@ -221,11 +199,11 @@ namespace graphs {
                 int prev_signal = m_work_signal.Peek();
 
                 if(m_problem.DoFusedInit(
-                        lwl_high, lwl_low,
-                        rwl_in, rwl_out,
+                        immediate_worklist, deferred_worklist,
+                        remote_input, remote_output,
                         FLAGS_fused_chunk_size,
-                        dwl.GetCurrentPrio(),
-                        high_work_counter, low_work_counter,
+                        dwl.GetPriorityThreshold(),
+                        immediate_work_counter, deferred_work_counter,
                         m_kernel_internal_counter,
                         m_work_signal.GetDevPtr(),
                         m_barrier_lifetime,
@@ -239,31 +217,31 @@ namespace graphs {
                         if (signal == prev_signal) break; // Exit was signaled  
 
                         int work = signal - prev_signal;
-                        dwl.ReportHighPrioWork(work, 0, "SplitSend", m_endpoint);
+                        dwl.ReportWork(work, 0, "SplitSend", m_endpoint);
 
                         prev_signal = signal; // Update
-                        peer->SendWork(); // Trigger work sending to router
+                        peer->SignalRemoteWork(Event()); // Trigger work sending to router
                     }
 
                     stream.EndSync(); // Sync             
                     
                     // Some work was done by init, report it   
-                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
-                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportDeferredWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
                 }
 
                 while (dwl.HasWork())
                 {
-                    int global_prio = dwl.GetCurrentPrio();
+                    int priority_threshold = dwl.GetPriorityThreshold();
 
                     if (FLAGS_verbose)
                     {
-                        int high_in = lwl_high->GetLength(stream);
-                        int low_in = lwl_low->GetLength(stream);
-                        int remote_in = rwl_in->GetLength(stream);
-                        int remote_out = rwl_out->GetLength(stream);
+                        int high_in = immediate_worklist->GetLength(stream);
+                        int low_in = deferred_worklist->GetLength(stream);
+                        int remote_in = remote_input->GetLength(stream);
+                        int remote_out = remote_output->GetLength(stream);
 
-                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", (groute::Endpoint::identity_type)endpoint, global_prio, high_in, low_in, remote_in, remote_out);
+                        printf("%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", (groute::Endpoint::identity_type)endpoint, priority_threshold, high_in, low_in, remote_in, remote_out);
                     }
 
                     if (FLAGS_count_work)
@@ -272,24 +250,16 @@ namespace graphs {
                     }
 
                     m_problem.DoFusedWork(
-                        lwl_high, lwl_low,
-                        rwl_in, rwl_out,
+                        immediate_worklist, deferred_worklist,
+                        remote_input, remote_output,
                         FLAGS_fused_chunk_size,
-                        global_prio,
-                        high_work_counter, low_work_counter,
+                        priority_threshold,
+                        immediate_work_counter, deferred_work_counter,
                         m_kernel_internal_counter,
                         m_work_signal.GetDevPtr(),
                         m_barrier_lifetime,
                         grid_dims, block_dims, stream
                         );
-
-                    // TODOs (DWL refactor):
-                    // General: hide router, pass workers + source endpoints, expose input links for sources
-                    // 1. Optimize pass loop and decouple from send loop (Done) 
-                    // 2. Use this thread for interacting with device signal and optimize send loop in DWLP (Done)
-                    // 3. Priority and callbacks, Fusion, etc.
-                    // 3. Cleanup and order
-                    // 4. Apps
                     
                     stream.BeginSync();
 
@@ -299,17 +269,17 @@ namespace graphs {
                         if (signal == prev_signal) break; // Exit was signaled  
 
                         int work = signal - prev_signal;
-                        dwl.ReportHighPrioWork(work, 0, "SplitSend", m_endpoint);
+                        dwl.ReportWork(work, 0, "SplitSend", m_endpoint);
 
                         prev_signal = signal; // Update
-                        peer->SendWork(); // Trigger work sending to router
+                        peer->SignalRemoteWork(Event()); // Trigger work sending to router
                     }
 
                     stream.EndSync(); // Sync             
                     
                     // Some work was done by the kernel, report it   
-                    dwl.ReportLowPrioWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
-                    dwl.ReportHighPrioWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportDeferredWork(*m_work_counters[LOW_COUNTER], 0, Algo::Name(), endpoint);
+                    dwl.ReportWork(*m_work_counters[HIGH_COUNTER], 0, Algo::Name(), endpoint);
 
                     if (FLAGS_verbose)
                     {
@@ -321,7 +291,7 @@ namespace graphs {
                         m_work_counts.push_back((int)(*m_work_counters[LOW_COUNTER]) + (int)(*m_work_counters[HIGH_COUNTER]));
                     }
 
-                    auto segs = peer->WaitForPrioOrWork(global_prio, stream);
+                    auto segs = peer->WaitForLocalWork(stream, priority_threshold);
 
                     if (FLAGS_verbose)
                     {
@@ -331,14 +301,14 @@ namespace graphs {
                             segs_size += seg.GetSegmentSize();
                         }
 
-                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", (groute::Endpoint::identity_type)endpoint, segs_size, global_prio, dwl.GetCurrentPrio());
+                        printf("%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", (groute::Endpoint::identity_type)endpoint, segs_size, priority_threshold, dwl.GetPriorityThreshold());
                     }
 
-                    if (global_prio < dwl.GetCurrentPrio()) // priority is up
+                    if (priority_threshold < dwl.GetPriorityThreshold()) // priority is up
                     {
-                        // Assuming that high priority is empty
-                        std::swap(lwl_high, lwl_low);
-                        // THIS WILL RUN ALL OF lwl_low NEXT TIME
+                        // Assuming that immediate worklist is empty. 
+                        // This will process all of deferred_worklist in the following iteration
+                        std::swap(immediate_worklist, deferred_worklist);
                     }
                 }
             }
