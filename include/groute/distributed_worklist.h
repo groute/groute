@@ -73,6 +73,8 @@ namespace groute {
 
         TPacked pack(const TUnpacked& data);
         TUnpacked unpack(const TPacked& data);
+
+        bool should_defer(TUnpacked work, TPrio global_threshold)
     };
     */
 
@@ -684,13 +686,7 @@ namespace groute {
                 return;
             }
 
-
             int low_prio_work = (m_deferred_work_counter += work);
-
-            //if (low_prio_work == 0)
-            //{
-            //
-            //}
         }
 
         int GetPriorityThreshold() override

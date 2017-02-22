@@ -217,9 +217,9 @@ namespace bfs {
                 return groute::SF_Pass;
             }
 
-            __device__ __forceinline__ bool is_high_prio(const local_work_t& work, const level_t& global_prio)
+            __device__ __forceinline__ bool should_defer(const local_work_t& work, const level_t& global_threshold)
             {
-                return m_levels_datum[work] <= global_prio;
+                return m_levels_datum[work] > global_threshold;
             }
 
             __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)

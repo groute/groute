@@ -338,9 +338,9 @@ namespace pr {
                 return groute::SF_Pass;
             }
 
-            __device__ __forceinline__ bool is_high_prio(const local_work_t& work, const rank_t& global_prio)
+            __device__ __forceinline__ bool should_defer(const local_work_t& work, const rank_t& global_threshold)
             {
-                return true; // NOTE: Can soft-priority be supported for PR?
+                return false; // TODO: Can soft-priority be supported for PR?
             }
 
             __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)

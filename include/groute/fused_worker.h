@@ -85,7 +85,7 @@ namespace groute
         // Returns number of processed items
 
         // Expecting a function in callbacks with the following signature:  
-        //      bool is_high_prio(T work, TPrio priority_threshold)
+        //      bool should_defer(T work, TPrio global_threshold)  
 
         uint32_t tid = TID_1D;
         uint32_t nthreads = TOTAL_THREADS_1D;
@@ -94,7 +94,7 @@ namespace groute
         {
             T work = remote_input.read(i); // takes care of circularity  
 
-            bool is_immediate_work = callbacks.is_high_prio(work, priority_threshold);
+            bool is_immediate_work = !callbacks.should_defer(work, priority_threshold);
 
             int immediate_mask = __ballot(is_immediate_work ? 1 : 0);
             int deferred_mask = __ballot(is_immediate_work ? 0 : 1);

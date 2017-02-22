@@ -141,7 +141,7 @@ namespace groute {
 
         /**
         * @brief Represents a segment send operation from a single source to multiple destinations
-        *           each segment send reports to an AggregatedEventPromise on completion
+        *           each segment send reports to an EventGroupPromise on completion
         */
         template <typename T>
         class SendOperation
@@ -219,7 +219,7 @@ namespace groute {
 
             void ReportProgress(size_t progress, const Event& ready_event)
             {
-                std::lock_guard<std::mutex> lock(m_mutex); // use another mutex ?..
+                std::lock_guard<std::mutex> lock(m_mutex); 
                 if (m_progress >= m_src_segment.GetSegmentSize()) return;
                 m_progress += progress;
                 m_ev_group->Add(ready_event);
@@ -692,7 +692,7 @@ namespace groute {
         // Internal router API, used by friend class Link
         //
     
-        ISender<T>* GetSender(Endpoint endpoint, size_t chunk_size = 0, size_t num_chunks = 0)
+        ISender<T>* GetSender(Endpoint endpoint)
         {
             std::lock_guard<std::mutex> guard(m_initialization_mutex);
             if (m_senders.find(endpoint) == m_senders.end())
