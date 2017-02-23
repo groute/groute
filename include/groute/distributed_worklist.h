@@ -162,6 +162,8 @@ namespace groute {
 
         virtual int GetPriorityThreshold() = 0;
         virtual bool HasWork() const = 0;
+        
+        std::mutex log_gate;
     };
 
     template<typename TLocal, typename TRemote>
@@ -309,7 +311,12 @@ namespace groute {
                 auto seg = fut.get();
                 if (seg.Empty()) break;
 
-                int pop_count = 0;
+                //{
+                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
+                //    printf("Receive (%d) | got: %llu\n", (Endpoint::identity_type)m_endpoint, seg.GetSegmentSize());
+                //}
+
+                size_t pop_count = 0;
                 while (!pops.empty() && groute::is_ready(pops.front().future)) // Loop over 'ready' (future, Event) pairs
                 {
                     auto pop = pops.front();
@@ -335,7 +342,12 @@ namespace groute {
                     pops.pop_front();
 
                 }
-
+                
+                //if (pop_count > 0)
+                //{
+                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
+                //    printf("Receive (%d) | pop: %llu\n", (Endpoint::identity_type)m_endpoint, pop_count);
+                //}
                 m_pass_worklist.PopItemsAsync(pop_count, stream);
 
                 // Queue a segment-wait on stream
@@ -408,6 +420,11 @@ namespace groute {
                 auto e = pop.future.get();
                 e.Wait(stream);
                 m_send_worklist.PopItemsAsync(pop.size, stream);
+
+                //{
+                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
+                //    printf("Send (%d) | pop: %llu\n", (Endpoint::identity_type)m_endpoint, pop.size);
+                //}
             }
         }
 
@@ -431,13 +448,13 @@ namespace groute {
             size_t mem_size;
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
-            m_receive_worklist = CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal));
+            m_receive_worklist = CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "receive");
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_out, mem_size, AF_PO2);
-            m_send_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote));
+            m_send_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "send");
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_pass, mem_size, AF_PO2);
-            m_pass_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote)); // TODO: should be relative to chunk_size and num_buffers
+            m_pass_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); // TODO: should be relative to chunk_size and num_buffers
 
             for (size_t i = 0; i < m_num_workspaces; i++)
             {
@@ -584,8 +601,6 @@ namespace groute {
             return m_ctr[(Endpoint::identity_type)endpoint + 1];
         }
 
-        std::mutex log_gate;
-
         DistributedWorklist(Context& context, Router<TRemote>& router, int ngpus, int priority_delta = 0) :
             m_context(context), m_router(router), m_ngpus(ngpus),
             m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(priority_delta), m_current_threshold(priority_delta), m_reported_work(0)
@@ -612,6 +627,11 @@ namespace groute {
             Endpoint endpoint, const DWCallbacks& callbacks,
             size_t chunk_size, size_t num_buffers, size_t num_workspaces)
         {
+            if (FLAGS_verbose && (Endpoint::identity_type)endpoint == 0)
+            {
+                printf("DW configuration: chunk: %llu, buffers: %llu, workspaces: %llu\n", chunk_size, num_buffers, num_workspaces);
+            }
+
             m_context.SetDevice(endpoint);
             auto peer = std::make_shared< PeerType >(
                 m_context, m_router, *this, (int)m_current_threshold, callbacks, endpoint, chunk_size, num_buffers, num_workspaces);
@@ -641,7 +661,7 @@ namespace groute {
             if (work == 0) return;
 
             if (!initial && (m_current_work_counter + m_deferred_work_counter) == 0) {
-                printf("Warning: seems like a BUG in the distributed worklist\n");
+                printf("Warning: work is reported after reaching zero work-items\n");
                 return;
             }
 
@@ -651,7 +671,7 @@ namespace groute {
             {
                 if (m_deferred_work_counter == 0)
                 {
-                    if (FLAGS_verbose) printf("Distributed Worklist Shutting Down: %s\n", caller);
+                    if (FLAGS_verbose) printf("Distributed Worklist Shutting Down successfully: %s\n", caller);
                     m_router.Shutdown();
                 }
 
@@ -682,7 +702,7 @@ namespace groute {
             if (work == 0) return;
 
             if ((m_current_work_counter + m_deferred_work_counter) == 0) {
-                printf("Warning: seems like a BUG in the distributed worklist\n");
+                printf("Warning: work is reported after reaching zero work-items\n");
                 return;
             }
 

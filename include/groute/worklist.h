@@ -753,23 +753,28 @@ namespace groute {
 
         int m_instance_id;
         mutable uint32_t m_max_usage;
+
+        Endpoint m_endpoint;
+        const char* m_name;
     
     public:
-        CircularWorklist(uint32_t capacity = 0) : 
+        CircularWorklist(uint32_t capacity = 0, Endpoint endpoint = Endpoint(), const char* name = "") : 
             m_data(nullptr), m_mem_owner(true), 
             m_start(nullptr), m_end(nullptr), m_alloc_end(nullptr), 
             m_host_start(nullptr), m_host_end(nullptr), m_host_alloc_end(nullptr), 
             m_capacity(capacity == 0 ? 0 : next_power_2(capacity)),
+            m_endpoint(endpoint), m_name(name),
             m_instance_id(0), m_max_usage(0)
         {
             Alloc();
         }
 
-        CircularWorklist(T *mem_buffer, uint32_t mem_size) : 
+        CircularWorklist(T *mem_buffer, uint32_t mem_size, Endpoint endpoint = Endpoint(), const char* name = "") : 
             m_data(mem_buffer), m_mem_owner(false), 
             m_start(nullptr), m_end(nullptr), m_alloc_end(nullptr), 
             m_host_start(nullptr), m_host_end(nullptr), m_host_alloc_end(nullptr), 
             m_capacity(mem_size),
+            m_endpoint(endpoint), m_name(name),
             m_instance_id(0), m_max_usage(0)
         {
             Alloc();
@@ -854,8 +859,8 @@ namespace groute {
             if (end - start >= m_capacity)
             {
                 printf(
-                    "\n\nCritical Warning: circular worklist has overflowed, please allocate more memory (instance id: %d, start: %d, end: %d, capacity: %d), exiting \n\n", 
-                    m_instance_id, start, end, m_capacity);
+                    "\n\nCritical Warning: circular worklist has overflowed, please allocate more memory \n\t\[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
+                    (Endpoint::identity_type)m_endpoint, m_name, m_instance_id, start, end, m_capacity, (end - start) - m_capacity);
                 exit(1);
             }
 
