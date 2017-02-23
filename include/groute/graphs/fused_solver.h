@@ -182,7 +182,7 @@ namespace graphs {
                 m_endpoint = endpoint;
 
                 groute::Worklist<TLocal>* immediate_worklist = &peer->GetLocalWorkspace(0);
-                groute::Worklist<TLocal>* deferred_worklist = &peer->GetLocalWorkspace(0);
+                groute::Worklist<TLocal>* deferred_worklist = &peer->GetLocalWorkspace(1);
 
                 groute::CircularWorklist<TRemote>*  remote_output = &peer->GetRemoteOutputWorklist();
                 groute::CircularWorklist<TLocal>*  remote_input = &peer->GetLocalInputWorklist();
