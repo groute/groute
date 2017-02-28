@@ -85,11 +85,9 @@ namespace cc
             graph = GetCachedGraph(graphfile, ggr);
 
             if (graph->nvtxs == 0) {
-                printf("Empty graph!\n");
+                printf("Empty graph, exiting\n");
                 exit(0);
             }
-
-            printf("\n----- Running CC Async -----\n\n");
 
             if (FLAGS_verbose)
             {
@@ -97,8 +95,10 @@ namespace cc
                 else                    printf("undirected=true,  expecting an undirected (symmetric) graph, removing bidirectional edges\n");
             }
 
-            LoadGraph(host_edges, &nvtxs, &nedges, graph, false, FLAGS_undirected);
+            LoadGraph(host_edges, &nvtxs, &nedges, graph, FLAGS_undirected);
             host_parents.resize(nvtxs);
+
+            printf("\n----- Running CC Async -----\n\n");
 
             if (verbose) {
                 printf("The graph has %d vertices, and %d edges (average degree: %f)\n", nvtxs, nedges, (float)nedges / nvtxs);

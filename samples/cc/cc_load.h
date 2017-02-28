@@ -34,6 +34,7 @@
 
 #include <groute/graphs/coo_graph.h>
 #include <utils/utils.h>
+#include <random>
 
 typedef groute::graphs::Edge Edge;
 typedef int component_t;
@@ -82,88 +83,78 @@ inline bool CheckComponents(std::vector<int> &host_parents, size_t count)
     return errors == 0;
 }
 
-inline void LoadGraph(
-    std::vector<Edge>& host_edges,
-    uint32_t* nvtxs, uint32_t* nedges, graph_t* graph,
-    bool ugtv, bool removeBidirectionalEdges)
+inline bool SampleBidirectionalEdges(graph_t* graph)
 {
-    uint32_t i, j, u, v, a, b;
-    Edge e;
+    bool duplicated = true;
+    
+    std::default_random_engine gen;
+    std::uniform_int_distribution<uint32_t> distribution(0, graph->nvtxs-1);
+    
+    // Randomly check if the graph actually has duplicated bidirectional edges
+    for (int i = 0; i < 100 && duplicated; ++i)
+    {
+        uint32_t u = distribution(gen); // Choose a random 'u' and make sure 100 of it's neighbor edges are duplicated  
 
-    i = graph->nedges;
-    j = graph->nvtxs;
+        for (uint32_t ui = graph->xadj[u], un = std::min(graph->xadj[u + 1], ui + 100 /*up to 100 neighbors*/); ui < un; ui++)
+        {
+            uint32_t v = graph->adjncy[ui];
 
-    host_edges.resize(i);
+            // Go over neighbors of 'v' now 
+            bool found = false;
+            for (uint32_t vi = graph->xadj[v], vn = graph->xadj[v + 1]; vi < vn; vi++)
+            {
+                if (vi == u) 
+                {
+                    found = true; // Reverse edge was found  
+                    break;
+                }
+            }
 
-    if (host_edges.size() != i){
-        printf("Insufficient memory, data lost");
-        exit(0);
-    }
-
-    uint32_t edc = 0;
-
-    for (a = 0; a < j; a++){
-        uint32_t n = graph->xadj[a + 1];
-        for (b = graph->xadj[a]; b < n; b++){
-
-            u = a;
-            v = graph->adjncy[b];
-
-            if (removeBidirectionalEdges && ((ugtv && u < v) || (!ugtv && u > v)))
-                continue; // take only one of the two [u, v] [v, u] edges
-
-            e.u = u;
-            e.v = v;
-            host_edges[edc++] = e;
+            if (found == false)
+            {
+                duplicated = false;
+                break;
+            }
         }
     }
 
-    *nvtxs = j;
-    *nedges = edc;
-
-    host_edges.resize(edc);
+    return duplicated;
 }
 
-inline void LoadGraph(
-    groute::pinned_vector<Edge>& host_edges,
-    uint32_t* nvtxs, uint32_t* nedges, graph_t* graph,
-    bool ugtv, bool removeBidirectionalEdges)
+template<typename EdgeInsertIterator>
+void LoadGraph(EdgeInsertIterator insert_iterator, uint32_t* nvtxs, uint32_t* nedges, graph_t* graph, bool duplicated) 
 {
-    uint32_t i, j, u, v, a, b;
-    Edge e;
+    uint32_t nedges_csr = graph->nedges, nvtxs_csr = graph->nvtxs, edge_counter = 0;
 
-    i = graph->nedges;
-    j = graph->nvtxs;
+    for (uint32_t u = 0; u < nvtxs_csr; u++)
+    {
+        for (uint32_t ui = graph->xadj[u], un = graph->xadj[u+1]; ui < un; ui++)
+        {
+            uint32_t v = graph->adjncy[ui];
 
-    host_edges.resize(i);
+            if (duplicated && u > v) continue; // Take only one of the two [u, v] [v, u] edges
 
-    if (host_edges.size() != i){
-        printf("Insufficient memory, data lost");
-        exit(0);
-    }
-
-    uint32_t edc = 0;
-
-    for (a = 0; a < j; a++){
-        uint32_t n = graph->xadj[a + 1];
-        for (b = graph->xadj[a]; b < n; b++){
-
-            u = a;
-            v = graph->adjncy[b];
-
-            if (removeBidirectionalEdges && ((ugtv && u < v) || (!ugtv && u > v)))
-                continue; // take only one of the two [u, v] [v, u] edges
-
-            e.u = u;
-            e.v = v;
-            host_edges[edc++] = e;
+            edge_counter++;
+            *(insert_iterator++) = Edge(u, v);
         }
     }
 
-    *nvtxs = j;
-    *nedges = edc;
+    *nvtxs = nvtxs_csr;
+    *nedges = edge_counter;
+}
 
-    host_edges.resize(edc);
+inline void LoadGraph(std::vector<Edge>& out_edges, uint32_t* nvtxs, uint32_t* nedges, graph_t* graph, bool undirected)
+{
+    bool duplicated = undirected ? SampleBidirectionalEdges(graph) : false;
+    out_edges.reserve(duplicated ? graph->nedges / 2 : graph->nedges); 
+    LoadGraph(std::back_inserter(out_edges), nvtxs, nedges, graph, duplicated);
+}
+
+inline void LoadGraph(groute::pinned_vector<Edge>& out_edges, uint32_t* nvtxs, uint32_t* nedges, graph_t* graph, bool undirected)
+{
+    bool duplicated = undirected ? SampleBidirectionalEdges(graph) : false;
+    out_edges.reserve(duplicated ? graph->nedges / 2 : graph->nedges); 
+    LoadGraph(std::back_inserter(out_edges), nvtxs, nedges, graph, duplicated);
 }
 
 #endif // __CC_LOAD_H
