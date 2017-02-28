@@ -108,6 +108,9 @@ bool RunCCMAsyncAtomic(int ngpus)
         groute::Segment<Edge> all_edges = groute::Segment<Edge>(&context.host_edges[0], context.nedges, context.nedges, 0);
         cc::EdgePartitioner partitioner(ngpus, context.nvtxs, all_edges, configuration.vertex_partitioning);
 
+        psw.stop(); // Partitioning time
+        par_total_ms += psw.ms();
+
         auto reduction_policy = FLAGS_tree_topology
             ? groute::Policy::CreateTreeReductionPolicy(ngpus)
             : groute::Policy::CreateOneWayReductionPolicy(ngpus);
@@ -118,17 +121,6 @@ bool RunCCMAsyncAtomic(int ngpus)
         groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
         groute::Link<Edge> send_link(host, input_router);
         groute::Link<component_t> receive_link(reduction_router, host, 0, 0); // no pipelining here 
-
-        IntervalRangeMarker iter_rng(context.nedges, "begin");
-
-        for (auto& edge_partition : partitioner.edge_partitions)
-        {
-            send_link.Send(edge_partition, groute::Event());
-        }
-        send_link.Shutdown();
-
-        psw.stop();
-        par_total_ms += psw.ms();
 
         std::vector< std::unique_ptr<cc::Problem> > problems;
         std::vector< std::unique_ptr<cc::Solver> > solvers;
@@ -146,6 +138,14 @@ bool RunCCMAsyncAtomic(int ngpus)
             solvers[i]->reduction_in = groute::Link<component_t>(reduction_router, i, configuration.parents_chunk_size, configuration.reduction_pipeline_buffers);
             solvers[i]->reduction_out = groute::Link<component_t>(i, reduction_router);
         }
+
+        IntervalRangeMarker iter_rng(context.nedges, "begin");
+
+        for (auto& edge_partition : partitioner.edge_partitions)
+        {
+            send_link.Send(edge_partition, groute::Event());
+        }
+        send_link.Shutdown();
 
         for (int i = 0; i < ngpus; ++i)
         {
