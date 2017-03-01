@@ -40,17 +40,14 @@
 
 #include <gflags/gflags_declare.h>
 #include <groute/context.h>
+#include <groute/graphs/common.h>
 
 DECLARE_bool(verbose);
 DECLARE_bool(pn);
 
-typedef uint32_t index_t;
-
 
 namespace groute {
 namespace graphs {
-
-    typedef uint32_t NoData; // NoData type for template defaults  
 
     struct CSRGraphBase
     {

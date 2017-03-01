@@ -220,7 +220,7 @@ namespace graphs {
         template<typename Algo, typename Problem, typename Solver, typename DWCallbacks, typename TLocal, typename TRemote, typename ...TGraphDatum>
         struct __MultiRunner__
         {
-            bool operator() (int ngpus, int nworkspaces, TGraphDatum&... args)
+            bool operator() (int ngpus, int prio_delta, TGraphDatum&... args)
             {
                 Context<Algo> context(ngpus);
 
@@ -241,10 +241,9 @@ namespace graphs {
                 dev_graph_allocator.AllocateDatumObjects(args...);
 
                 // currently not use, follow the code into the DistributedWorklistPeer classes
-                size_t max_work_size = (context.host_graph.nedges / ngpus) * FLAGS_wl_alloc_factor; // (edges / ngpus) is the best approximation we have   
-                if (FLAGS_wl_alloc_abs > 0)
-                    max_work_size = FLAGS_wl_alloc_abs;
-
+                //size_t max_work_size = (context.host_graph.nedges / ngpus) * FLAGS_wl_alloc_factor; // (edges / ngpus) is the best approximation we have   
+                //if (FLAGS_wl_alloc_abs > 0)
+                //    max_work_size = FLAGS_wl_alloc_abs;
 
                 size_t num_exch_buffs = (FLAGS_pipe_size <= 0)
                     ? ngpus*FLAGS_pipe_size_factor
@@ -253,14 +252,16 @@ namespace graphs {
                     ? max((size_t)(context.host_graph.nnodes * FLAGS_pipe_alloc_factor), (size_t)1)
                     : FLAGS_pipe_alloc_size;
 
-                groute::Router<TRemote> worklist_router(
-                    context, groute::Policy::CreateRingPolicy(ngpus), ngpus+1, ngpus);
-                groute::Link<TRemote> input_link(groute::Endpoint::HostEndpoint(0), worklist_router); // Used for work initialized by host such as BFS source vertex  
+                // Prepare DistributedWorklist parameters
+                Endpoint host = Endpoint::HostEndpoint(0);
+                EndpointList worker_endpoints = Endpoint::Range(ngpus);
+                std::map<Endpoint, DWCallbacks> callbacks;
+                for (int i = 0; i < ngpus; ++i)
+                {
+                    callbacks[worker_endpoints[i]] = DWCallbacks(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
+                }
 
-                groute::DistributedWorklist<TLocal, TRemote, DWCallbacks> distributed_worklist(context, worklist_router, ngpus, FLAGS_prio_delta);
-
-                std::vector< std::shared_ptr< groute::IDistributedWorklistPeer<TLocal, TRemote> > > worklist_peers;
-                std::vector< std::thread > dev_threads;
+                DistributedWorklist<TLocal, TRemote, DWCallbacks> distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
 
                 std::vector< std::unique_ptr<Problem> > problems;
                 std::vector< std::unique_ptr<Solver> > solvers;
@@ -270,18 +271,11 @@ namespace graphs {
                     // Set device for possible internal allocations  
                     context.SetDevice(i);
 
-                    worklist_peers.push_back(
-                        distributed_worklist.CreatePeer(
-                        i,
-                        DWCallbacks(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...),
-                        max_exch_size, num_exch_buffs, nworkspaces));
-
                     // Allocating problems and solvers here to allow internal device allocations  
                     problems.push_back(groute::make_unique<Problem>(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...));
                     solvers.push_back(groute::make_unique<Solver>(std::ref(context), std::ref(*problems[i])));
                 }
                 
-                distributed_worklist.InitPeers(); // 
                 context.SyncAllDevices(); // Allocations are on default streams, syncing all devices 
 
                 std::vector<std::thread> workers;
@@ -292,9 +286,7 @@ namespace graphs {
                     auto dev_func = [&](size_t i)
                     {
                         context.SetDevice(i);
-                        groute::Stream stream = context.CreateStream(i);
-
-                        auto& worklist_peer = worklist_peers[i];
+                        Stream stream = context.CreateStream(i);
 
                         Problem& problem = *problems[i];
                         Solver& solver = *solvers[i];
@@ -305,7 +297,7 @@ namespace graphs {
                         barrier.Sync(); // signal to host
                         barrier.Sync(); // receive signal from host
 
-                        solver.Solve(context, i, distributed_worklist, worklist_peer.get(), stream);
+                        solver.Solve(context, i, distributed_worklist, distributed_worklist.GetPeer(i), stream);
 
                         barrier.Sync(); // signal to host
                     };
@@ -315,8 +307,8 @@ namespace graphs {
 
                 barrier.Sync(); // wait for devices to init 
 
-                Algo::Init(context, dev_graph_allocator, input_link, distributed_worklist); // init from host
-                input_link.Shutdown();
+                Algo::Init(context, dev_graph_allocator, distributed_worklist); // init from host
+                distributed_worklist.GetLink(host).Shutdown();
 
                 Stopwatch sw(true); // all threads are running, start timing
                 

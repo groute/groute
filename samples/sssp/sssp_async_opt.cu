@@ -212,6 +212,8 @@ namespace sssp {
                 : m_graph_seg(graph_seg), m_distances_datum(distances_datum)
             {
             }
+            
+            DWCallbacks() { }
 
             __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
             {
@@ -390,7 +392,6 @@ namespace sssp {
             static void Init(
                 groute::graphs::traversal::Context<sssp::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
-                groute::Link<remote_work_t>& input_link,
                 groute::DistributedWorklist<local_work_t, remote_work_t, DWCallbacks>& distributed_worklist)
             {
                 index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
@@ -400,13 +401,18 @@ namespace sssp {
                 {
                     source_node = partitioner->GetReverseLookupFunc()(source_node);
                 }
+                
+                // Host endpoint for sending initial work  
+                groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
 
-                // report the initial work
-                distributed_worklist.ReportWork(1, 0, "Host", groute::Endpoint::HostEndpoint(0), true);
+                // Report the initial work
+                distributed_worklist.ReportWork(1, 0, Name(), host, true);
 
                 std::vector<remote_work_t> initial_work;
                 initial_work.push_back(remote_work_t(source_node, 0));
-                input_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+                distributed_worklist
+                    .GetLink(host)
+                    .Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
             }
 
             template<
@@ -468,5 +474,5 @@ bool TestSSSPAsyncMultiOptimized(int ngpus)
     groute::graphs::multi::EdgeInputDatum<distance_t> edge_weights;
     groute::graphs::multi::NodeOutputGlobalDatum<distance_t> node_distances;
     
-    return runner(ngpus, 2, edge_weights, node_distances);
+    return runner(ngpus, FLAGS_prio_delta, edge_weights, node_distances);
 }

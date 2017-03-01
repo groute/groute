@@ -205,6 +205,8 @@ namespace bfs {
             {
             }
 
+            DWCallbacks() { }
+
             __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
             {
                 if (m_graph_seg.owns(work.node))
@@ -377,7 +379,6 @@ namespace bfs {
             static void Init(
                 groute::graphs::traversal::Context<bfs::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
-                groute::Link<remote_work_t>& input_link,
                 groute::DistributedWorklist<local_work_t, remote_work_t, bfs::opt::DWCallbacks>& distributed_worklist)
             {
                 index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
@@ -387,13 +388,18 @@ namespace bfs {
                 {
                     source_node = partitioner->GetReverseLookupFunc()(source_node);
                 }
+                
+                // Host endpoint for sending initial work  
+                groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
 
                 // Report the initial work
-                distributed_worklist.ReportWork(1, 0, "Host", groute::Endpoint::HostEndpoint(0), true);
+                distributed_worklist.ReportWork(1, 0, Name(), host, true);
 
                 std::vector<remote_work_t> initial_work;
                 initial_work.push_back(remote_work_t(source_node, 0));
-                input_link.Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+                distributed_worklist
+                    .GetLink(host)
+                    .Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
             }
 
             template<typename TGraphAllocator, typename TGraphDatum, typename...UnusedData>
@@ -442,5 +448,5 @@ bool TestBFSAsyncMultiOptimized(int ngpus)
 
     groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
     
-    return runner(ngpus, 2, levels_datum);
+    return runner(ngpus, FLAGS_prio_delta, levels_datum);
 }

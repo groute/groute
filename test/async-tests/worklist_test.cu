@@ -130,6 +130,8 @@ namespace histogram
         {
         }
 
+        DWCallbacks() : m_seg_index(-1), m_seg_size(-1) { }
+
     private:
         int m_seg_index;
         int m_seg_size;
@@ -144,9 +146,9 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     ASSERT_GT(histo_seg_size, 0);
 
-    size_t max_work_size = work_size; // round_up(work_size, (size_t)ngpus);
+    size_t input_packet_size = work_size; // round_up(work_size, (size_t)ngpus * 2);
     size_t num_exch_buffs = 4 * ngpus;
-    size_t max_exch_size = work_size; // round_up(max_work_size, num_exch_buffs);
+    size_t exch_packet_size = work_size; // round_up(work_size, num_exch_buffs);
 
     groute::Context context(ngpus);
 
@@ -158,7 +160,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     for (int i = 0; i < ngpus; ++i)
     {
-        receiver_links.push_back(groute::Link<int>(input_router, i, max_work_size, 1));
+        receiver_links.push_back(groute::Link<int>(input_router, i, input_packet_size, 1));
     }
 
     srand(static_cast <unsigned> (22522));
@@ -173,14 +175,6 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     send_link.Shutdown();
     //
     //
-    //
-
-    groute::Router<int> exchange_router(context, groute::Policy::CreateRingPolicy(ngpus), ngpus, ngpus);
-    
-    groute::DistributedWorklist<int, int, histogram::DWCallbacks> distributed_worklist(context, exchange_router, ngpus, 0);
-
-    std::vector< std::shared_ptr< groute::IDistributedWorklistPeer<int, int> > > worklist_peers;
-    std::vector< std::thread > dev_threads;
 
     std::vector<int*> dev_segs(ngpus);
 
@@ -190,12 +184,17 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
         CUASSERT_NOERR(cudaMalloc(&dev_segs[i], histo_seg_size * sizeof(int)));
         CUASSERT_NOERR(cudaMemset(dev_segs[i], 0, histo_seg_size * sizeof(int)));
-
-        worklist_peers.push_back(
-            distributed_worklist.CreatePeer(i, histogram::DWCallbacks(i, histo_seg_size), max_exch_size, num_exch_buffs, 0));
     }
 
-    distributed_worklist.InitPeers();
+    // Prepare DistributedWorklist parameters
+    groute::EndpointList worker_endpoints = groute::Endpoint::Range(ngpus);
+    std::map<groute::Endpoint, histogram::DWCallbacks> callbacks;
+    for (int i = 0; i < ngpus; ++i)
+    {
+        callbacks[worker_endpoints[i]] = histogram::DWCallbacks(i, histo_seg_size);
+    }
+
+    groute::DistributedWorklist<int, int, histogram::DWCallbacks> distributed_worklist(context, { /*No sources*/ }, worker_endpoints, callbacks, exch_packet_size, num_exch_buffs, 0);
 
     std::vector<std::thread> workers;
     groute::internal::Barrier barrier(ngpus);
@@ -207,7 +206,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             context.SetDevice(i);
             groute::Stream stream = context.CreateStream(i);
 
-            auto& worklist_peer = worklist_peers[i];
+            auto worklist_peer = distributed_worklist.GetPeer(i);
 
             auto input_fut = receiver_links[i].PipelinedReceive();
             auto input_seg = input_fut.get();

@@ -49,7 +49,7 @@ namespace graphs {
 
     namespace traversal
     {
-        template<typename Algo, typename ProblemType, typename TLocal ,typename TRemote, typename PrioT, typename SplitOps, typename... WorkArgs>
+        template<typename Algo, typename ProblemType, typename TLocal ,typename TRemote, typename TPrio, typename DWCallbacks, typename... WorkArgs>
         struct FusedSolver
         {
             ProblemType& m_problem;
@@ -96,20 +96,14 @@ namespace graphs {
                     {
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                             &fused_work_residency,
-                            groute::FusedWork 
-                            < groute::NeverStop, TLocal, 
-                              TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkTypeCTA, WorkArgs... >,
+                            groute::FusedWork < groute::NeverStop, TLocal, TRemote, TPrio, DWCallbacks, typename ProblemType::WorkTypeCTA, WorkArgs... >,
                             BlockSize, 0);
                     }
                     else
                     {
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                             &fused_work_residency,
-                            groute::FusedWork
-                            < groute::NeverStop, TLocal, 
-                              TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkType, WorkArgs... >,
+                            groute::FusedWork < groute::NeverStop, TLocal, TRemote, TPrio, DWCallbacks, typename ProblemType::WorkType, WorkArgs... >,
                             BlockSize, 0);
                     }
                 }
@@ -119,20 +113,14 @@ namespace graphs {
                     {
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                             &fused_work_residency,
-                            groute::FusedWork 
-                            < groute::RunNTimes<1>, TLocal, 
-                              TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkTypeCTA, WorkArgs... >,
+                            groute::FusedWork < groute::RunNTimes<1>, TLocal, TRemote, TPrio, DWCallbacks, typename ProblemType::WorkTypeCTA, WorkArgs... >,
                             BlockSize, 0);
                     }
                     else
                     {
                         cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                             &fused_work_residency,
-                            groute::FusedWork 
-                            < groute::RunNTimes<1>, TLocal, 
-                              TRemote, PrioT, SplitOps, 
-                              typename ProblemType::WorkType, WorkArgs... >,
+                            groute::FusedWork < groute::RunNTimes<1>, TLocal, TRemote, TPrio, DWCallbacks, typename ProblemType::WorkType, WorkArgs... >,
                             BlockSize, 0);
                     }
                 }
@@ -175,7 +163,7 @@ namespace graphs {
             void Solve(
                 groute::Context& context,
                 groute::Endpoint endpoint,
-                groute::DistributedWorklist<TLocal, TRemote, SplitOps>& dwl,
+                groute::DistributedWorklist<TLocal, TRemote, DWCallbacks>& dwl,
                 groute::IDistributedWorklistPeer<TLocal, TRemote>* peer,
                 groute::Stream& stream)
             {

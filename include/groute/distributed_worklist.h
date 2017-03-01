@@ -192,9 +192,13 @@ namespace groute {
     };
 
     template<typename TLocal, typename TRemote, typename DWCallbacks>
+    class DistributedWorklist;
+
+    template<typename TLocal, typename TRemote, typename DWCallbacks>
     class DistributedWorklistPeer : public IDistributedWorklistPeer < TLocal, TRemote >
     {
-    private:
+        friend class DistributedWorklist < TLocal, TRemote, DWCallbacks > ;
+
         Context& m_context;
         IDistributedWorklist& m_distributed_worklist;
 
@@ -427,21 +431,7 @@ namespace groute {
                 //}
             }
         }
-
-    public:
-        DistributedWorklistPeer(
-            Context& context, Router<TRemote>& router, IDistributedWorklist& distributed_worklist,
-            int priority_threshold, const DWCallbacks& device_callbacks,
-            Endpoint endpoint, size_t chunk_size, size_t num_buffers, size_t num_workspaces)
-            :
-            m_context(context), m_endpoint(endpoint), m_distributed_worklist(distributed_worklist),
-            m_chunk_size(chunk_size), m_num_buffers(num_buffers), m_num_workspaces(num_workspaces),
-            m_current_threshold(priority_threshold), m_device_callbacks(device_callbacks),
-            m_link_in(router, endpoint, chunk_size, num_buffers),
-            m_link_out(endpoint, router)
-        {
-        }
-
+        
         void InitWorklists()
         {
             void* mem_buffer;
@@ -479,6 +469,19 @@ namespace groute {
             m_receive_thread = std::thread([this]() { ReceiveLoop(); });
             m_pop_thread = std::thread([this]() { PopLoop(); });
         }
+    public:
+        DistributedWorklistPeer(
+            Context& context, Router<TRemote>& router, IDistributedWorklist& distributed_worklist,
+            int priority_threshold, const DWCallbacks& device_callbacks,
+            Endpoint endpoint, size_t chunk_size, size_t num_buffers, size_t num_workspaces)
+            :
+            m_context(context), m_endpoint(endpoint), m_distributed_worklist(distributed_worklist),
+            m_chunk_size(chunk_size), m_num_buffers(num_buffers), m_num_workspaces(num_workspaces),
+            m_current_threshold(priority_threshold), m_device_callbacks(device_callbacks),
+            m_link_in(router, endpoint, chunk_size, num_buffers),
+            m_link_out(endpoint, router)
+        {
+        }
 
         ~DistributedWorklistPeer()
         {
@@ -492,7 +495,7 @@ namespace groute {
 
         CircularWorklist<TRemote>& GetRemoteOutputWorklist() override { return m_send_worklist; }
 
-        std::vector< Segment<TLocal> > WaitForLocalWork(Stream& stream, int priority_threshold) override
+        std::vector< Segment<TLocal> > WaitForLocalWork(Stream& stream, int priority_threshold = 0) override
         {
             auto segs = m_receive_worklist.ToSegs(stream);
 
@@ -505,7 +508,7 @@ namespace groute {
 
                     while (true)
                     {
-                        if (priority_threshold < m_current_threshold) break;
+                        if (priority_threshold > 0 && priority_threshold < m_current_threshold) break;
                         if (m_exit) break;
 
                         if (m_receive_work)
@@ -519,7 +522,7 @@ namespace groute {
                     }
                 }
 
-                if (priority_threshold < m_current_threshold) return segs;
+                if (priority_threshold > 0 && priority_threshold < m_current_threshold) return segs;
                 if (m_exit) return segs;
 
                 work_ev.Wait(stream.cuda_stream);
@@ -580,10 +583,11 @@ namespace groute {
         typedef DistributedWorklistPeer<TLocal, TRemote, DWCallbacks> PeerType;
 
         Context& m_context;
-        Router<TRemote>& m_router;
-        int m_ngpus;
+        Router<TRemote> m_router;
 
-        std::vector< std::shared_ptr<PeerType> > m_peers;
+        EndpointList m_workers; // Worker endpoints  
+        std::map<Endpoint, std::unique_ptr<PeerType> > m_peers; // DW peer per worker
+        std::map<Endpoint, Link<TRemote> > m_links; // Link per source
 
         std::atomic<int> m_current_work_counter;
         std::atomic<int> m_deferred_work_counter;
@@ -592,22 +596,50 @@ namespace groute {
         volatile int m_current_threshold;
 
         // Work-item counter
-        std::atomic<unsigned int> m_reported_work;
-        std::vector<unsigned int> m_ctr;
+        std::atomic<uint32_t> m_total_work;
+        std::map<Endpoint, std::atomic<uint32_t>> m_endpoint_work;
 
+        // TODO: std::thread m_watchdog; 
     public:
-        unsigned int GetCurrentWorkCount(Endpoint endpoint)
-        {
-            return m_ctr[(Endpoint::identity_type)endpoint + 1];
-        }
 
-        DistributedWorklist(Context& context, Router<TRemote>& router, int ngpus, int priority_delta = 0) :
-            m_context(context), m_router(router), m_ngpus(ngpus),
-            m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(priority_delta), m_current_threshold(priority_delta), m_reported_work(0)
+        DistributedWorklist(
+            Context& context, const EndpointList& sources, const EndpointList& workers, const std::map<Endpoint, DWCallbacks>& callbacks, 
+            size_t chunk_size, size_t num_buffers, int priority_delta = 0) :
+            m_context(context), m_router(context, Policy::CreateRingPolicy(workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
+            m_workers(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(priority_delta), 
+            m_current_threshold(priority_delta == 0 ? INT32_MAX : priority_delta), m_total_work(0)
         {
-            if (FLAGS_count_work)
+            if (workers.size() != callbacks.size()) throw std::exception("DW parameter mismatch (workers <-> callbacks)");
+
+            if (FLAGS_verbose)
             {
-                m_ctr.resize(ngpus + 1, 0);
+                printf(
+                    "DW configuration: chunk: %llu, buffers: %llu, priority -> [delta: %d, initial threshold: %d]\n", 
+                    chunk_size, num_buffers, priority_delta, m_current_threshold);
+            }
+
+            for (Endpoint source : sources)
+            {
+                m_endpoint_work[source] = 0; // Also sources report work
+                m_links[source] = Link<TRemote>(source, m_router);
+            }
+
+            for (Endpoint worker : m_workers)
+            {
+                m_endpoint_work[worker] = 0;
+                m_context.SetDevice(worker);
+
+                if (callbacks.find(worker) == callbacks.end()) throw std::exception("DW: missing DWCallbacks for worker");
+
+                auto peer = groute::make_unique< PeerType >(
+                    m_context, m_router, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size, num_buffers, priority_delta == 0 ? 1 : 2);
+                m_peers[worker] = std::move(peer);
+            }
+
+            // Second phase: for allocating available memory for local work-queues after link allocation   
+            for (Endpoint worker : m_workers)
+            {
+                m_peers[worker]->InitWorklists();
             }
         }
 
@@ -616,36 +648,28 @@ namespace groute {
             if (FLAGS_count_work && FLAGS_verbose)
             {
                 printf("Work performed by each GPU:\n");
-                for (size_t i = 1; i < m_ctr.size(); ++i)
-                    printf("  GPU %llu: %d work-items\n", i, m_ctr[i]);
-                int repwork = m_reported_work;
+                for (auto& p : m_endpoint_work)
+                    printf("  GPU %d: %d work-items\n", (Endpoint::identity_type)p.first, (uint32_t)p.second);
+                int repwork = m_total_work;
                 printf("Total work-items: %d\n", repwork);
             }
         }
 
-        std::shared_ptr< IDistributedWorklistPeer<TLocal, TRemote> > CreatePeer(
-            Endpoint endpoint, const DWCallbacks& callbacks,
-            size_t chunk_size, size_t num_buffers, size_t num_workspaces)
+        Link<TRemote>& GetLink(Endpoint source)
         {
-            if (FLAGS_verbose && (Endpoint::identity_type)endpoint == 0)
-            {
-                printf("DW configuration: chunk: %llu, buffers: %llu, workspaces: %llu\n", chunk_size, num_buffers, num_workspaces);
-            }
-
-            m_context.SetDevice(endpoint);
-            auto peer = std::make_shared< PeerType >(
-                m_context, m_router, *this, (int)m_current_threshold, callbacks, endpoint, chunk_size, num_buffers, num_workspaces);
-            m_peers.push_back(peer);
-            return peer;
+            if (m_links.find(source) == m_links.end()) throw std::exception("Endpoint not registered as a source");
+            return m_links[source];
         }
 
-        void InitPeers()
+        IDistributedWorklistPeer<TLocal, TRemote>* GetPeer(Endpoint worker)
         {
-            // Temp: we need a two phase init for now
-            for (auto& peer : m_peers)
-            {
-                peer->InitWorklists();
-            }
+            if (m_peers.find(worker) == m_peers.end()) throw std::exception("Endpoint not registered as a worker");
+            return m_peers[worker].get();
+        }
+
+        uint32_t GetCurrentWorkCount(Endpoint endpoint)
+        {
+            return m_endpoint_work[endpoint];
         }
 
         void ReportWork(int new_work, int performed_work, const char* caller, Endpoint endpoint, bool initial = false) override
@@ -654,8 +678,9 @@ namespace groute {
 
             if (FLAGS_count_work)
             {
-                m_reported_work += performed_work;
-                m_ctr[(Endpoint::identity_type)endpoint + 1] += performed_work;
+                uint32_t w = (new_work < 0 ? -new_work : 0) + (performed_work > 0 ? performed_work : 0);
+                m_total_work += w;
+                m_endpoint_work[endpoint] += w;
             }
 
             if (work == 0) return;
@@ -681,9 +706,9 @@ namespace groute {
                     m_deferred_work_counter = 0;
 
                     m_current_threshold += m_priority_delta;
-                    for (auto& peer : m_peers)
+                    for (auto& p : m_peers)
                     {
-                        peer->AdvancePriorityThreshold(m_current_threshold);
+                        p.second->AdvancePriorityThreshold(m_current_threshold);
                     }
                 }
             }
@@ -695,8 +720,9 @@ namespace groute {
 
             if (FLAGS_count_work)
             {
-                m_reported_work += performed_work;
-                m_ctr[(Endpoint::identity_type)endpoint + 1] += performed_work;
+                uint32_t w = (new_work < 0 ? -new_work : 0) + (performed_work > 0 ? performed_work : 0);
+                m_total_work += w;
+                m_endpoint_work[endpoint] += w;
             }
 
             if (work == 0) return;
@@ -706,7 +732,7 @@ namespace groute {
                 return;
             }
 
-            int low_prio_work = (m_deferred_work_counter += work);
+            m_deferred_work_counter += work;
         }
 
         int GetPriorityThreshold() override

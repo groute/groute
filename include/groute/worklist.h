@@ -563,8 +563,7 @@ namespace groute {
 
         Worklist(Worklist&& other)
         {
-            *this = other;              // first copy all fields  
-            new (&other) Worklist(0);   // clear up other
+            *this = std::move(other);
         }
 
     private:
@@ -573,8 +572,8 @@ namespace groute {
     public:
         Worklist& operator=(Worklist&& other)
         {
-            *this = other;              // first copy all fields  
-            new (&other) Worklist(0);   // clear up other
+            *this = other;              // First copy all fields  
+            new (&other) Worklist(0);   // Clear up other
 
             return (*this);
         }
@@ -637,7 +636,14 @@ namespace groute {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_count, m_counters + m_current_slot, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             stream.Sync();
     
-            assert(*m_host_count <= m_capacity);
+            if(*m_host_count > m_capacity)
+            {
+                printf(
+                    "\n\nCritical Warning: worklist has overflowed, please allocate more memory \n\t\[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
+                    (Endpoint::identity_type)0, "", -1, m_capacity, *m_host_count - m_capacity);
+                exit(1);
+            }
+
             return *m_host_count;
         }
 
@@ -728,11 +734,37 @@ namespace groute {
         }
     };
 
-    inline int CircularWorklistInstanceCounter()
+    class MemoryMonitor
     {
-        static int instance_counter = 0;
-        return ++instance_counter;
-    }
+        struct Entry
+        {
+            
+        };
+
+        std::string m_app, m_dataset;
+
+        std::atomic<int> m_id_gen;
+
+        MemoryMonitor() : m_id_gen(0) { }
+
+        static MemoryMonitor& Instance()
+        {
+            static MemoryMonitor monitor;
+            return monitor;
+        }
+
+    public:
+        static void Init(const std::string& app, const std::string& dataset)
+        {
+            Instance().m_app = app;
+            Instance().m_dataset = dataset;
+        }
+
+        static int Register()
+        {
+            return Instance().m_id_gen++;
+        }
+    };
     
     template<typename T>
     class CircularWorklist
@@ -781,7 +813,11 @@ namespace groute {
         }
 
         CircularWorklist(const CircularWorklist& other) = delete;
-        CircularWorklist(CircularWorklist&& other) = delete;
+
+        CircularWorklist(CircularWorklist&& other)
+        {
+            *this = std::move(other);
+        }
 
     private:
         CircularWorklist& operator=(const CircularWorklist& other) = default;
@@ -789,8 +825,8 @@ namespace groute {
     public:
         CircularWorklist& operator=(CircularWorklist&& other)
         {
-            *this = other;                      // first copy all fields  
-            new (&other) CircularWorklist(0);   // clear up other
+            *this = other;                      // First copy all fields 
+            new (&other) CircularWorklist(0);   // Clear up other
 
             return (*this);
         }
@@ -809,9 +845,7 @@ namespace groute {
 
             assert((m_capacity - 1 & m_capacity) == 0);
 
-            //static int instance_counter = 0;
-            //m_instance_id = ++instance_counter;
-            m_instance_id = CircularWorklistInstanceCounter();
+            m_instance_id = MemoryMonitor::Register();
     
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaMalloc(&m_data, sizeof(T) * m_capacity));

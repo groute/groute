@@ -49,9 +49,6 @@
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="bfs_common.h" />
-    <ClInclude Include="..\..\include\groute\device_router.cuh">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\utils\app_skeleton.h">
       <Filter>utils</Filter>
     </ClInclude>

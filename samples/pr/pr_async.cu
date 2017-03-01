@@ -402,6 +402,8 @@ namespace pr
         {
         }
 
+        DWCallbacks() { }
+
         __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
         {
             if (m_graph_seg.owns(work.node))
@@ -679,7 +681,6 @@ namespace pr
         static void Init(
             groute::graphs::traversal::Context<pr::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
-            groute::Link<remote_work_t>& input_link,
             groute::DistributedWorklist<local_work_t, remote_work_t, DWCallbacks>& distributed_worklist)
         {
             distributed_worklist.ReportWork(context.host_graph.nnodes, 0, Name(), groute::Endpoint::HostEndpoint(0), true); // PR starts with all nodes
@@ -743,7 +744,7 @@ bool TestPageRankAsyncMulti(int ngpus)
     ResidualDatum residual;
     RankDatum current_ranks;
     
-    return runner(ngpus, 1, residual, current_ranks);
+    return runner(ngpus, 0, residual, current_ranks);
 }
 
 bool TestPageRankSingle()
