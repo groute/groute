@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_WORKERS_H
-#define __GROUTE_WORKERS_H
+#ifndef __GROUTE_WORKLIST_WORKERS_H
+#define __GROUTE_WORKLIST_WORKERS_H
 
 #include <vector>
 #include <algorithm>
@@ -38,9 +38,10 @@
 #include <cub/grid/grid_barrier.cuh>
 
 #include <groute/context.h>
-#include <groute/work_kernels.h>
+#include <groute/worklist/work_kernels.cu.h>
 
 #include <gflags/gflags.h>
+#include <utils/markers.h>
 
 DEFINE_int32(fused_chunk_size, INT_MAX, "Intermediate peer transfer");
 
@@ -378,4 +379,4 @@ namespace groute {
     };
 }
 
-#endif // __GROUTE_WORKERS_H
+#endif // __GROUTE_WORKLIST_WORKERS_H

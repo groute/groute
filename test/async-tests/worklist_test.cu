@@ -39,7 +39,7 @@
 #include <utils/app_skeleton.h>
 
 #include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
+#include <groute/worklist/distributed_worklist.cu.h>
 
 #include <utils/cuda_utils.h>
 

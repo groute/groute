@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_WORKLIST_H
-#define __GROUTE_WORKLIST_H
+#ifndef __GROUTE_WORK_QUEUE_H
+#define __GROUTE_WORK_QUEUE_H
 
 #include <initializer_list>
 #include <vector>
@@ -1121,4 +1121,4 @@ namespace groute {
     };
 }
 
-#endif // __GROUTE_WORKLIST_H
+#endif // __GROUTE_WORK_QUEUE_H

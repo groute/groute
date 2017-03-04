@@ -39,10 +39,8 @@
 
 #include <gflags/gflags_declare.h>
 
-#include <groute/event_pool.h>
-#include <groute/context.h>
-#include <groute/worklist.h>
 #include <groute/groute.h>
+#include <groute/worklist/work_queue.cu.h>
 
 DECLARE_bool(verbose);
 DECLARE_bool(count_work);

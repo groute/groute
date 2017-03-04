@@ -40,8 +40,8 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
 #include <groute/graphs/csr_graph.h>
+#include <groute/worklist/distributed_worklist.cu.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>
@@ -89,8 +89,6 @@ using std::max;
 
 inline void KernelSizing(dim3& grid_dims, dim3& block_dims, uint32_t work_size)
 {
-    // TODO (later): automatic kernel sizing   
-
     dim3 bd(FLAGS_block_size, 1, 1);
     dim3 gd(round_up(work_size, bd.x), 1, 1);
 
@@ -218,7 +216,7 @@ namespace graphs {
         * @brief A raw template for running multi-GPUs traversal solvers
         */
         template<typename Algo, typename TWorker, typename DWCallbacks, typename TLocal, typename TRemote, typename ...TGraphData>
-        struct __MultiRunner__
+        struct Runner
         {
             bool operator() (int ngpus, int prio_delta, TGraphData&... args)
             {
@@ -358,255 +356,8 @@ namespace graphs {
                 }
             }
         };
-
-        /*
-        * @brief A generic multi-GPU solver used for classic BFS + SSSP
-        */
-        /*
-        template<typename Algo, typename Problem, typename DWCallbacks, typename TLocal, typename TRemote>
-        struct __MultiSolver__
-        {
-            Problem& m_problem;
-
-    public:
-        __MultiSolver__(groute::Context& context, Problem& problem) : m_problem(problem) { }
-
-        void Solve(
-            groute::Context& context,
-            groute::Endpoint endpoint,
-            groute::DistributedWorklist<TLocal, TRemote, DWCallbacks>& distributed_worklist,
-            groute::IDistributedWorklistPeer<TLocal, TRemote>* worklist_peer,
-            groute::Stream& stream)
-            {
-                auto& input_worklist = worklist_peer->GetLocalInputWorklist();
-                auto& workspace = worklist_peer->GetLocalWorkspace(0); 
-
-                while (distributed_worklist.HasWork())
-                {
-                    auto input_segs = worklist_peer->WaitForLocalWork(stream);
-                    size_t new_work = 0, performed_work = 0;
-
-                    if (input_segs.empty()) continue;
-
-                    // If circular buffer passed the end, 2 buffers will be given: [s,end) and [0,e)
-                    for (auto input_seg : input_segs)
-                    {
-                        auto subseg = input_seg;
-                        m_problem.template Relax <groute::Worklist<TLocal>>(subseg, workspace, stream);
-
-                        input_worklist.PopItemsAsync(subseg.GetSegmentSize(), stream.cuda_stream);
-                        performed_work += subseg.GetSegmentSize();
-                    }
-
-                    auto output_seg = workspace.ToSeg(stream);
-                    new_work += output_seg.GetSegmentSize(); // add the new work 
-                    worklist_peer->PerformSplitSend(output_seg, stream); // call split-send
-
-                    workspace.ResetAsync(stream.cuda_stream); // reset the temp output worklist  
-
-#ifndef NDEBUG  
-                    if (FLAGS_debug_print)
-                    {
-                        std::unique_lock<std::mutex> guard(distributed_worklist.log_gate);
-                        printf("\n\n\tDevice: %d\n%s->Input: ", (int)endpoint, Algo::Name());
-                        input_worklist.PrintOffsetsDebug(stream);
-                        printf("\n%s->Output: ", Algo::Name());
-                        workspace.PrintOffsetsDebug(stream);
-                    }
-#endif
-
-                    // report work
-                    distributed_worklist.ReportWork(
-                        (int)new_work,
-                        (int)performed_work,
-                        Algo::Name(), endpoint
-                        );
-                }
-            }
-        };
-        */
-
-        template<typename Algo, typename Problem, typename...TGraphDatum>
-        struct __SingleRunner__
-        {
-            bool operator() (TGraphDatum&... args) // single GPU test
-            {
-                Context<Algo> context(1);
-
-                single::CSRGraphAllocator
-                    dev_graph_allocator(context.host_graph);
-                
-                context.SetDevice(0);
-                
-                dev_graph_allocator.AllocateDatumObjects(args...);
-
-                context.SyncDevice(0); // graph allocations are on default streams, must sync device 
-
-                Problem problem(dev_graph_allocator.DeviceObject(), args.DeviceObject()...);
-
-                size_t max_work_size = context.host_graph.nedges * FLAGS_wl_alloc_factor;
-                if (FLAGS_wl_alloc_abs > 0)
-                    max_work_size = FLAGS_wl_alloc_abs;
-
-                groute::Stream stream;
-
-                groute::Worklist<index_t> wl1(max_work_size), wl2(max_work_size);
-                
-                wl1.ResetAsync(stream.cuda_stream);
-                wl2.ResetAsync(stream.cuda_stream);
-                stream.Sync();
-
-                Stopwatch sw(true);
-                IntervalRangeMarker algo_rng(context.host_graph.nedges, "begin");
-
-                groute::Worklist<index_t>* in_wl = &wl1, *out_wl = &wl2;
-
-                problem.Init(*in_wl, stream);
-
-                groute::Segment<index_t> work_seg;
-                work_seg = in_wl->ToSeg(stream);
-
-                while (work_seg.GetSegmentSize() > 0)
-                {
-                    problem.template Relax <groute::Worklist<index_t>>(work_seg, *out_wl, stream);
-
-                    in_wl->ResetAsync(stream.cuda_stream);
-                    std::swap(in_wl, out_wl);
-                    work_seg = in_wl->ToSeg(stream);
-                }
-
-                algo_rng.Stop();
-                sw.stop();
-
-                if (FLAGS_repetitions > 1)
-                    printf("\nWarning: ignoring repetitions flag, running just one repetition (not implemented)\n");
-
-                printf("\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
-
-                // Gather
-                auto gathered_output = Algo::Gather(dev_graph_allocator, args...);
-                
-                if (FLAGS_output.length() != 0)
-                    Algo::Output(FLAGS_output.c_str(), gathered_output);
-
-                if (FLAGS_check) {
-                    auto regression = Algo::Host(context.host_graph, args...);
-                    return Algo::CheckErrors(gathered_output, regression) == 0;
-                }
-                else {
-                    printf("Warning: Result not checked\n");
-                    return true;
-                }
-            }
-        };
     }
 }
-}
-
-namespace
-{
-    typedef int mark_t;
-
-    template<typename SourceDatum, typename TPacked>
-    __global__ void PackHalosDataKernel(
-        SourceDatum source_datum,
-        groute::graphs::dev::GraphDatum<index_t> halos_datum,
-        groute::graphs::dev::GraphDatum<mark_t> halos_marks,
-        groute::dev::CircularWorklist<TPacked> remote_worklist)
-    {
-        int tid = TID_1D;
-        unsigned nthreads = TOTAL_THREADS_1D;
-
-        for (uint32_t i = 0 + tid; i < halos_datum.size; i += nthreads)
-        {
-            index_t halo_node = halos_datum[i]; // promised to be unique
-            if (halos_marks[halo_node] == 1)
-            {
-                remote_worklist.append_warp(TPacked(halo_node, source_datum[halo_node]));
-                halos_marks[halo_node] = 0;
-            }
-        }
-    }
-
-    struct WorkTargetWorklist
-    {
-    private:
-        groute::dev::Worklist<index_t> m_worklist;
-
-    public:
-        WorkTargetWorklist(groute::Worklist<index_t>& worklist) : m_worklist(worklist.DeviceObject()) { }
-
-        template<typename UnusedParam>
-        __device__ __forceinline__ void append_work(const UnusedParam& graph, index_t work)
-        {
-            m_worklist.append_warp(work);
-        }
-
-        __device__ __forceinline__ void append_work(index_t work)
-        {
-            m_worklist.append_warp(work);
-        }
-    };
-
-    struct WorkTargetSplitMark
-    {
-    private:
-        groute::dev::Worklist<index_t> m_local_worklist;
-        groute::graphs::dev::GraphDatum<mark_t> m_remote_marks;
-        groute::dev::Counter m_remote_counter;
-
-    public:
-        WorkTargetSplitMark(
-            groute::Worklist<index_t>& local_worklist,
-            groute::graphs::dev::GraphDatum<mark_t> remote_marks,
-            groute::Counter& remote_counter) :
-            m_local_worklist(local_worklist.DeviceObject()), m_remote_marks(remote_marks), m_remote_counter(remote_counter.DeviceObject())
-        {
-
-        }
-
-        template<typename TGraph>
-        __device__ __forceinline__ void append_work(const TGraph& graph, index_t work)
-        {
-            if (graph.owns(work))
-            {
-                m_local_worklist.append_warp(work);
-            }
-            else
-            {
-                if (m_remote_marks[work] == 0)
-                {
-                    m_remote_marks[work] = 1; // mark
-                    m_remote_counter.add_one_warp();
-                }
-            }
-        }
-    };
-
-    struct WorkTargetMark
-    {
-    private:
-        groute::graphs::dev::GraphDatum<mark_t> m_remote_marks;
-        groute::dev::Counter m_remote_counter;
-
-    public:
-        WorkTargetMark(
-            groute::graphs::dev::GraphDatum<mark_t> remote_marks,
-            groute::Counter& remote_counter) :
-            m_remote_marks(remote_marks), m_remote_counter(remote_counter.DeviceObject())
-        {
-
-        }
-
-        __device__ __forceinline__ void append_work(index_t work)
-        {
-            if (m_remote_marks[work] == 0)
-            {
-                m_remote_marks[work] = 1; // mark
-                m_remote_counter.add_one_warp();
-            }
-        }
-    };
 }
 
 #endif // __GROUTE_GRAPHS_TRAVERSAL_ALGO_H

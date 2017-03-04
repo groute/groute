@@ -35,7 +35,7 @@
 #include "test_common.h"
 
 #include <groute/event_pool.h>
-#include <groute/worklist.h>
+#include <groute/worklist/work_queue.cu.h>
 
 #include <utils/cuda_utils.h>
 

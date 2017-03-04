@@ -34,7 +34,7 @@
 
 #include <cub/grid/grid_barrier.cuh>
 
-#include <groute/worklist.h>
+#include <groute/worklist/work_queue.cu.h>
 
 #define GTID (blockIdx.x * blockDim.x + threadIdx.x)
 

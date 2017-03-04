@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_CTA_WORK_H
-#define __GROUTE_CTA_WORK_H
+#ifndef __GROUTE_CTA_SCHEDULER_H
+#define __GROUTE_CTA_SCHEDULER_H
 
 #include <initializer_list>
 #include <vector>
@@ -37,7 +37,7 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
-#include "worklist.h"
+#include <groute/worklist/work_queue.cu.h>
 
 
 //#define NO_CTA_WARP_INTRINSICS 
@@ -249,4 +249,4 @@ namespace dev {
 }
 }
 
-#endif // __GROUTE_CTA_WORK_H
+#endif // __GROUTE_CTA_SCHEDULER_H

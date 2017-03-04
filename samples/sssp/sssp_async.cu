@@ -35,8 +35,8 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
-#include <groute/cta_work.h>
+#include <groute/worklist/distributed_worklist.cu.h>
+#include <groute/cta/cta_scheduler.cu.h>
 
 #include <groute/graphs/csr_graph.h>
 #include <groute/graphs/traversal.h>

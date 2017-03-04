@@ -36,6 +36,8 @@
 #include <climits>
 #include <type_traits>
 
+#include <groute/internal/cuda_utils.h>
+
 
 namespace {
     static inline __host__ __device__ size_t round_up(
@@ -378,7 +380,7 @@ namespace groute {
             GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
         }
 
-        bool Query()
+        bool Query() const
         {
             return cudaEventQuery(sync_event) == cudaSuccess;
         }

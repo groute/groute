@@ -35,18 +35,14 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
-#include <groute/work_kernels.h>
-#include <groute/cta_work.h>
+#include <groute/worklist/distributed_worklist.cu.h>
+#include <groute/worklist/work_kernels.cu.h>
+#include <groute/device/cta_scheduler.cu.h>
 
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal.h>
-#include <groute/workers.h>
+#include <groute/worklist/workers.cu.h>
 
-#include <utils/parser.h>
-#include <utils/utils.h>
-#include <utils/stopwatch.h>
-#include <utils/markers.h>
+#include <utils/graphs/traversal.h>
 
 #include "bfs_common.h"
 
@@ -278,7 +274,7 @@ namespace bfs {
         groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> ;
 
     template<typename TWorker>
-    using RunnerType = groute::graphs::traversal::__MultiRunner__ <
+    using RunnerType = groute::graphs::traversal::Runner <
         Algo, TWorker, DWCallbacks, local_work_t, remote_work_t,
         groute::graphs::multi::NodeOutputGlobalDatum<level_t> > ;
 }
