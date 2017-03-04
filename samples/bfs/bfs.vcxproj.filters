@@ -64,12 +64,6 @@
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h">
       <Filter>groute\graphs</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h">
-      <Filter>groute\graphs</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h">
-      <Filter>groute\graphs</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h">
       <Filter>groute\internal</Filter>
     </ClInclude>
@@ -80,9 +74,6 @@
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\link.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_worker.h">
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
@@ -98,6 +89,15 @@
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\distributed_worklist.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\graphs\traversal.h">
+      <Filter>groute\graphs</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\work_kernels.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\workers.h">
       <Filter>groute</Filter>
     </ClInclude>
   </ItemGroup>

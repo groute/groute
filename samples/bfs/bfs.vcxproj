@@ -184,12 +184,12 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\cta_work.h" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
     <ClInclude Include="..\..\include\groute\distributed_worklist.h" />
-    <ClInclude Include="..\..\include\groute\fused_worker.h" />
+    <ClInclude Include="..\..\include\groute\workers.h" />
+    <ClInclude Include="..\..\include\groute\work_kernels.h" />
     <ClInclude Include="..\..\include\groute\graphs\common.h" />
     <ClInclude Include="..\..\include\groute\graphs\coo_graph.h" />
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h" />
-    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h" />
-    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h" />
+    <ClInclude Include="..\..\include\groute\graphs\traversal.h" />
     <ClInclude Include="..\..\include\groute\groute.h" />
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h" />
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h" />
@@ -217,10 +217,10 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="bfs_async.cu">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </CudaCompile>
     <CudaCompile Include="bfs_async_opt.cu" />
   </ItemGroup>

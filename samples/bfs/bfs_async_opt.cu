@@ -36,12 +36,12 @@
 
 #include <groute/event_pool.h>
 #include <groute/distributed_worklist.h>
-#include <groute/fused_worker.h>
+#include <groute/work_kernels.h>
 #include <groute/cta_work.h>
 
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal_algo.h>
-#include <groute/graphs/fused_solver.h>
+#include <groute/graphs/traversal.h>
+#include <groute/workers.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>
@@ -50,8 +50,11 @@
 
 #include "bfs_common.h"
 
-DECLARE_int32(source_node);
-extern const level_t INF;
+//DECLARE_int32(source_node);
+//extern const level_t INF;
+
+DEFINE_int32(source_node, 0, "The source node for the BFS traversal (clamped to [0, nnodes-1])");
+const level_t INF = UINT_MAX;
 
 namespace bfs {
     namespace opt {
@@ -79,16 +82,12 @@ namespace bfs {
             }
         }
 
-        template<
-            typename TGraph,
-            typename TGraphDatum>
+
         struct BFSWorkCTA
         {
-            template<typename WorkSource>
+            template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
             __device__ static void work(
-                const WorkSource& work_source,
-                groute::dev::CircularWorklist<local_work_t>& rwl_in,
-                groute::dev::CircularWorklist<remote_work_t>& rwl_out,
+                const WorkSource& work_source, WorkTarget& work_target,
                 const TGraph& graph, TGraphDatum& levels_datum
                 )
             {
@@ -112,28 +111,12 @@ namespace bfs {
 
                     groute::dev::CTAWorkScheduler<level_t>::template schedule(
                         np_local, 
-                        [&graph, &levels_datum, &rwl_in, &rwl_out](index_t edge, level_t next_level)
+                        [&work_target, &graph, &levels_datum](index_t edge, level_t next_level)
                         {
                             index_t dest = graph.edge_dest(edge);
                             if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
                             {
-                                int is_owned = graph.owns(dest); 
-
-                                int owned_mask = __ballot(is_owned ? 1 : 0);
-                                int remote_mask = __ballot(is_owned ? 0 : 1);
-
-                                if (is_owned)
-                                {
-                                    int high_leader = __ffs(owned_mask) - 1;
-                                    int thread_offset = __popc(owned_mask & ((1 << lane_id()) - 1));
-                                    rwl_in.prepend_warp(dest, high_leader, __popc(owned_mask), thread_offset);
-                                }
-                                else
-                                {
-                                    int low_leader = __ffs(remote_mask) - 1;
-                                    int thread_offset = __popc(remote_mask & ((1 << lane_id()) - 1));
-                                    rwl_out.append_warp(LevelData(dest, next_level), low_leader, __popc(remote_mask), thread_offset);
-                                }
+                                work_target.append_work(LevelData(dest, next_level));
                             }
                         }
                         ); 
@@ -141,16 +124,11 @@ namespace bfs {
             }
         };
 
-        template<
-            typename TGraph,
-            typename TGraphDatum>
         struct BFSWork
         {
-            template<typename WorkSource>
+            template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
             __device__ static void work(
-                const WorkSource& work_source,
-                groute::dev::CircularWorklist<local_work_t>& rwl_in,
-                groute::dev::CircularWorklist<remote_work_t>& rwl_out,
+                const WorkSource& work_source, WorkTarget& work_target,
                 const TGraph& graph, TGraphDatum& levels_datum
                 )
             {
@@ -169,23 +147,7 @@ namespace bfs {
                         index_t dest = graph.edge_dest(edge);
                         if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
                         {
-                            int is_owned = graph.owns(dest);
-
-                            int owned_mask = __ballot(is_owned ? 1 : 0);
-                            int remote_mask = __ballot(is_owned ? 0 : 1);
-
-                            if (is_owned)
-                            {
-                                int high_leader = __ffs(owned_mask) - 1;
-                                int thread_offset = __popc(owned_mask & ((1 << lane_id()) - 1));
-                                rwl_in.prepend_warp(dest, high_leader, __popc(owned_mask), thread_offset);
-                            }
-                            else
-                            {
-                                int low_leader = __ffs(remote_mask) - 1;
-                                int thread_offset = __popc(remote_mask & ((1 << lane_id()) - 1));
-                                rwl_out.append_warp(LevelData(dest, next_level), low_leader, __popc(remote_mask), thread_offset);
-                            }
+                            work_target.append_work(LevelData(dest, next_level));
                         }
                     }
                 }
@@ -242,135 +204,6 @@ namespace bfs {
             }
         };
 
-        template<typename TGraph, typename TGraphDatum>
-        struct FusedProblem
-        {
-            TGraph m_graph;
-            TGraphDatum m_levels_datum;
-
-            typedef BFSWork<TGraph, TGraphDatum> WorkType;
-            typedef BFSWorkCTA<TGraph, TGraphDatum> WorkTypeCTA;
-
-        public:
-            FusedProblem(const TGraph& graph, const TGraphDatum& levels_datum) :
-                m_graph(graph), m_levels_datum(levels_datum)
-            {
-            }
-
-            // Called before a global CPU+GPU barrier
-            void Init(groute::Stream& stream) const
-            {
-                dim3 grid_dims, block_dims;
-                KernelSizing(grid_dims, block_dims, m_levels_datum.size);
-
-                BFSInit <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
-                    m_levels_datum.data_ptr, m_levels_datum.size);
-            }
-
-            bool DoFusedInit(groute::Worklist<local_work_t>* lwl_high, groute::Worklist<local_work_t>* lwl_low,
-                groute::CircularWorklist<local_work_t>*  rwl_in, groute::CircularWorklist<remote_work_t>*  rwl_out,
-                int fused_chunk_size, level_t global_prio,
-                volatile int *high_work_counter, volatile int *low_work_counter,
-                uint32_t *kernel_internal_counter, volatile int *send_signal_ptr,
-                cub::GridBarrierLifetime& barrier_lifetime,
-                dim3 grid_dims, dim3 block_dims, groute::Stream& stream)
-            {
-                return false; // no work was done here
-            }
-
-            void DoFusedWork(groute::Worklist<local_work_t>* lwl_high, groute::Worklist<local_work_t>* lwl_low,
-                groute::CircularWorklist<local_work_t>*  rwl_in, groute::CircularWorklist<remote_work_t>*  rwl_out,
-                int fused_chunk_size, level_t global_prio,
-                volatile int *high_work_counter, volatile int *low_work_counter,
-                uint32_t *kernel_internal_counter, volatile int *send_signal_ptr,
-                cub::GridBarrierLifetime& barrier_lifetime,
-                dim3 grid_dims, dim3 block_dims, groute::Stream& stream)
-            {
-                if (FLAGS_iteration_fusion)
-                {
-                    if (FLAGS_cta_np)
-                    {
-                        groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, level_t, DWCallbacks,
-                            WorkTypeCTA,
-                            TGraph, TGraphDatum >
-
-                            <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
-
-                            lwl_high->DeviceObject(), lwl_low->DeviceObject(),
-                            rwl_in->DeviceObject(), rwl_out->DeviceObject(),
-                            fused_chunk_size, global_prio,
-                            high_work_counter, low_work_counter,
-                            kernel_internal_counter, send_signal_ptr,
-                            barrier_lifetime,                       
-                            bfs::opt::DWCallbacks(m_graph, m_levels_datum),
-                            m_graph, m_levels_datum
-                            );
-                    }
-                    else
-                    {
-                        groute::FusedWork <
-                            groute::NeverStop, local_work_t, remote_work_t, level_t, DWCallbacks,
-                            WorkType,
-                            TGraph, TGraphDatum >
-
-                            <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
-
-                            lwl_high->DeviceObject(), lwl_low->DeviceObject(),
-                            rwl_in->DeviceObject(), rwl_out->DeviceObject(),
-                            fused_chunk_size, global_prio,
-                            high_work_counter, low_work_counter,
-                            kernel_internal_counter, send_signal_ptr,
-                            barrier_lifetime,
-                            bfs::opt::DWCallbacks(m_graph, m_levels_datum),
-                            m_graph, m_levels_datum
-                            );
-                    }
-                }
-                else
-                {
-                    if (FLAGS_cta_np)
-                    {
-                        groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, level_t, DWCallbacks,
-                            WorkTypeCTA,
-                            TGraph, TGraphDatum >
-
-                            <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
-
-                            lwl_high->DeviceObject(), lwl_low->DeviceObject(),
-                            rwl_in->DeviceObject(), rwl_out->DeviceObject(),
-                            fused_chunk_size, global_prio,
-                            high_work_counter, low_work_counter,
-                            kernel_internal_counter, send_signal_ptr,
-                            barrier_lifetime,
-                            bfs::opt::DWCallbacks(m_graph, m_levels_datum),
-                            m_graph, m_levels_datum
-                            );
-                    }
-                    else
-                    {
-                        groute::FusedWork <
-                            groute::RunNTimes<1>, local_work_t, remote_work_t, level_t, DWCallbacks,
-                            WorkType,
-                            TGraph, TGraphDatum >
-
-                            << < grid_dims, block_dims, 0, stream.cuda_stream >> > (
-
-                            lwl_high->DeviceObject(), lwl_low->DeviceObject(),
-                            rwl_in->DeviceObject(), rwl_out->DeviceObject(),
-                            fused_chunk_size, global_prio,
-                            high_work_counter, low_work_counter,
-                            kernel_internal_counter, send_signal_ptr,
-                            barrier_lifetime,
-                            bfs::opt::DWCallbacks(m_graph, m_levels_datum),
-                            m_graph, m_levels_datum
-                            );
-                    }
-                }
-            }
-        };
-
         struct Algo
         {
             static const char* NameLower()      { return "bfs"; }
@@ -379,7 +212,7 @@ namespace bfs {
             static void Init(
                 groute::graphs::traversal::Context<bfs::opt::Algo>& context,
                 groute::graphs::multi::CSRGraphAllocator& graph_manager,
-                groute::DistributedWorklist<local_work_t, remote_work_t, bfs::opt::DWCallbacks>& distributed_worklist)
+                groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
             {
                 index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
@@ -400,6 +233,17 @@ namespace bfs {
                 distributed_worklist
                     .GetLink(host)
                     .Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+            }
+
+            template<typename TGraph, typename TGraphDatum>
+            static void DeviceInit(groute::Stream& stream, TGraph graph, TGraphDatum levels_datum)
+            {
+                
+                dim3 grid_dims, block_dims;
+                KernelSizing(grid_dims, block_dims, levels_datum.size);
+
+                BFSInit <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
+                    levels_datum.data_ptr, levels_datum.size);
             }
 
             template<typename TGraphAllocator, typename TGraphDatum, typename...UnusedData>
@@ -430,23 +274,48 @@ namespace bfs {
 
 bool TestBFSAsyncMultiOptimized(int ngpus)
 {
-    typedef bfs::opt::FusedProblem<groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum<level_t>> ProblemType;
-    typedef groute::graphs::traversal::FusedSolver<
-        bfs::opt::Algo, ProblemType, 
-        bfs::opt::local_work_t , bfs::opt::remote_work_t, level_t, 
-        bfs::opt::DWCallbacks, 
-        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum<level_t>> SolverType;
+    typedef groute::FusedWorker <
+        true, bfs::opt::local_work_t, bfs::opt::remote_work_t, int, bfs::opt::DWCallbacks, bfs::opt::BFSWorkCTA, 
+        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> WorkerType;
 
     groute::graphs::traversal::__MultiRunner__ <
-        bfs::opt::Algo,
-        ProblemType,
-        SolverType,
-        bfs::opt::DWCallbacks,
-        bfs::opt::local_work_t,
-        bfs::opt::remote_work_t,
+        bfs::opt::Algo, WorkerType, bfs::opt::DWCallbacks, bfs::opt::local_work_t, bfs::opt::remote_work_t,
         groute::graphs::multi::NodeOutputGlobalDatum<level_t> > runner;
-
+    
     groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
     
     return runner(ngpus, FLAGS_prio_delta, levels_datum);
 }
+
+bool TestBFSAsyncMulti(int ngpus)
+{
+    return true;
+}
+
+bool TestBFSSingle()
+{
+    return true;
+}
+
+//bool TestBFSAsyncMultiOptimized(int ngpus)
+//{
+//    typedef bfs::opt::FusedProblem<groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum<level_t>> ProblemType;
+//    typedef groute::graphs::traversal::FusedWorker<
+//        bfs::opt::Algo, ProblemType, 
+//        bfs::opt::local_work_t , bfs::opt::remote_work_t, level_t, 
+//        bfs::opt::DWCallbacks, 
+//        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum<level_t>> SolverType;
+//
+//    groute::graphs::traversal::__MultiRunner__ <
+//        bfs::opt::Algo,
+//        ProblemType,
+//        SolverType,
+//        bfs::opt::DWCallbacks,
+//        bfs::opt::local_work_t,
+//        bfs::opt::remote_work_t,
+//        groute::graphs::multi::NodeOutputGlobalDatum<level_t> > runner;
+//
+//    groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
+//    
+//    return runner(ngpus, FLAGS_prio_delta, levels_datum);
+//}

@@ -39,8 +39,8 @@
 #include <groute/cta_work.h>
 
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal_algo.h>
-#include <groute/graphs/fused_solver.h>
+#include <groute/graphs/traversal.h>
+#include <groute/workers.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>
@@ -302,7 +302,7 @@ namespace sssp {
                 {
                     if (FLAGS_cta_np)
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::NeverStop, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkTypeCTA,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
@@ -321,7 +321,7 @@ namespace sssp {
                     }
                     else
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::NeverStop, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkType,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
@@ -344,7 +344,7 @@ namespace sssp {
                 {
                     if (FLAGS_cta_np)
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkTypeCTA,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
@@ -363,7 +363,7 @@ namespace sssp {
                     }
                     else
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::RunNTimes<1>, local_work_t, remote_work_t, distance_t, DWCallbacks,
                             WorkType,
                             TGraph, TWeightDatum<distance_t>, TDistanceDatum<distance_t> >
@@ -455,7 +455,7 @@ namespace sssp {
 bool TestSSSPAsyncMultiOptimized(int ngpus)
 {
     typedef sssp::opt::FusedProblem<groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatumSeg, groute::graphs::dev::GraphDatum> ProblemType;
-    typedef groute::graphs::traversal::FusedSolver<
+    typedef groute::graphs::traversal::FusedWorker<
         sssp::opt::Algo, ProblemType, 
         sssp::opt::local_work_t , sssp::opt::remote_work_t, distance_t, 
         sssp::opt::DWCallbacks, 

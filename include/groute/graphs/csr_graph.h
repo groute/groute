@@ -1050,7 +1050,7 @@ namespace graphs {
         /*
         * @brief A node data array with local allocation for each device
         * Each device can read/write only from/to its local nodes
-        * Date is gathered to host from each segment of each device
+        * Data is gathered to host from each segment of each device
         */
         template<typename T>
         class NodeOutputLocalDatum

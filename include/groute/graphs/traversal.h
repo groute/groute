@@ -217,10 +217,10 @@ namespace graphs {
         /*
         * @brief A raw template for running multi-GPUs traversal solvers
         */
-        template<typename Algo, typename Problem, typename Solver, typename DWCallbacks, typename TLocal, typename TRemote, typename ...TGraphDatum>
+        template<typename Algo, typename TWorker, typename DWCallbacks, typename TLocal, typename TRemote, typename ...TGraphData>
         struct __MultiRunner__
         {
-            bool operator() (int ngpus, int prio_delta, TGraphDatum&... args)
+            bool operator() (int ngpus, int prio_delta, TGraphData&... args)
             {
                 Context<Algo> context(ngpus);
 
@@ -261,20 +261,20 @@ namespace graphs {
                     callbacks[worker_endpoints[i]] = DWCallbacks(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
                 }
 
-                DistributedWorklist<TLocal, TRemote, DWCallbacks> distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
+                DistributedWorklist<TLocal, TRemote, DWCallbacks, TWorker> distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
 
-                std::vector< std::unique_ptr<Problem> > problems;
-                std::vector< std::unique_ptr<Solver> > solvers;
+                //std::vector< std::unique_ptr<Problem> > problems;
+                //std::vector< std::unique_ptr<Solver> > solvers;
 
-                for (int i = 0; i < ngpus; ++i)
-                {
-                    // Set device for possible internal allocations  
-                    context.SetDevice(i);
+                //for (int i = 0; i < ngpus; ++i)
+                //{
+                //    // Set device for possible internal allocations  
+                //    context.SetDevice(i);
 
-                    // Allocating problems and solvers here to allow internal device allocations  
-                    problems.push_back(groute::make_unique<Problem>(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...));
-                    solvers.push_back(groute::make_unique<Solver>(std::ref(context), std::ref(*problems[i])));
-                }
+                //    // Allocating problems and solvers here to allow internal device allocations  
+                //    problems.push_back(groute::make_unique<Problem>(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...));
+                //    solvers.push_back(groute::make_unique<Solver>(std::ref(context), std::ref(*problems[i])));
+                //}
                 
                 context.SyncAllDevices(); // Allocations are on default streams, syncing all devices 
 
@@ -288,16 +288,20 @@ namespace graphs {
                         context.SetDevice(i);
                         Stream stream = context.CreateStream(i);
 
-                        Problem& problem = *problems[i];
-                        Solver& solver = *solvers[i];
+                        //Problem& problem = *problems[i];
+                        //Solver& solver = *solvers[i];
+                        //problem.Init(stream);
 
-                        problem.Init(stream);
+                        Algo::DeviceInit(stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
+
                         stream.Sync();
 
                         barrier.Sync(); // signal to host
                         barrier.Sync(); // receive signal from host
 
-                        solver.Solve(context, i, distributed_worklist, distributed_worklist.GetPeer(i), stream);
+                        //solver.Solve(context, i, distributed_worklist, distributed_worklist.GetPeer(i), stream);
+
+                        distributed_worklist.Work(i, stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
                         barrier.Sync(); // signal to host
                     };
@@ -358,6 +362,7 @@ namespace graphs {
         /*
         * @brief A generic multi-GPU solver used for classic BFS + SSSP
         */
+        /*
         template<typename Algo, typename Problem, typename DWCallbacks, typename TLocal, typename TRemote>
         struct __MultiSolver__
         {
@@ -419,6 +424,7 @@ namespace graphs {
                 }
             }
         };
+        */
 
         template<typename Algo, typename Problem, typename...TGraphDatum>
         struct __SingleRunner__

@@ -39,7 +39,7 @@
 #include <groute/cta_work.h>
 
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal_algo.h>
+#include <groute/graphs/traversal.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>

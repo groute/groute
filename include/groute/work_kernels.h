@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_FUSED_WORKER_CUH
-#define __GROUTE_FUSED_WORKER_CUH
+#ifndef __GROUTE_WORK_KERNELS_CUH
+#define __GROUTE_WORK_KERNELS_CUH
 
 #include <vector>
 
@@ -40,6 +40,118 @@
 
 namespace groute
 {
+    namespace dev
+    {
+        template<typename TLocal, typename TRemote, typename DWCallbacks>
+        struct WorkTargetWorklist
+        {
+        private:
+            dev::Worklist<TLocal>& m_worklist;
+            DWCallbacks& m_callbacks;
+
+        public:
+            __device__ __forceinline__  WorkTargetWorklist(dev::Worklist<TLocal>& worklist, DWCallbacks& callbacks) : m_worklist(worklist), m_callbacks(callbacks) { }
+
+            __device__ __forceinline__ void append_work(const TLocal& work)
+            {
+                m_worklist.append_warp(work);
+            }
+
+            __device__ __forceinline__ void append_work(const TRemote& work)
+            {
+                m_worklist.append_warp(m_callbacks.unpack(work));
+            }
+        };
+
+        template<typename T, typename DWCallbacks>
+        struct WorkTargetWorklist < T, T, DWCallbacks >
+        {
+        private:
+            dev::Worklist<T>& m_worklist;
+
+        public:
+            __device__ __forceinline__  WorkTargetWorklist(dev::Worklist<T>& worklist, DWCallbacks& callbacks) : m_worklist(worklist) { }
+
+            __device__ __forceinline__ void append_work(const T& work)
+            {
+                m_worklist.append_warp(work);
+            }
+        };
+
+        template<typename TLocal, typename TRemote, typename DWCallbacks>
+        struct WorkTargetSplit
+        {
+        private:
+            dev::CircularWorklist<TLocal>& m_remote_input;
+            dev::CircularWorklist<TRemote>& m_remote_output;
+            DWCallbacks& m_callbacks;
+
+        public:
+            __device__ __forceinline__  WorkTargetSplit(dev::CircularWorklist<TLocal>& remote_input, dev::CircularWorklist<TRemote>& remote_output, DWCallbacks& callbacks) :
+                m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
+
+            __device__ __forceinline__ void append_work(const TLocal& unpacked)
+            {
+                SplitFlags flags = m_callbacks.on_send(unpacked);
+                if (flags & SF_Take)
+                {
+                    m_remote_input.prepend_warp(unpacked); // prepending to input 
+                }
+
+                if (flags & SF_Pass)
+                {
+                    // pack data
+                    TRemote packed = m_callbacks.pack(unpacked);
+                    m_remote_output.append_warp(packed); // appending  
+                }
+            }
+
+            __device__ __forceinline__ void append_work(const TRemote& packed)
+            {
+                // unpack data
+                TLocal unpacked = m_callbacks.unpack(packed);
+                SplitFlags flags = m_callbacks.on_send(unpacked);
+                if (flags & SF_Take)
+                {
+                    m_remote_input.prepend_warp(unpacked); // prepending to input 
+                }
+
+                if (flags & SF_Pass)
+                {
+                    m_remote_output.append_warp(packed); // appending  
+                }
+            }
+        };
+
+        template<typename T, typename DWCallbacks>
+        struct WorkTargetSplit < T, T, DWCallbacks >
+        {
+        private:
+            dev::CircularWorklist<T>& m_remote_input;
+            dev::CircularWorklist<T>& m_remote_output;
+            DWCallbacks& m_callbacks;
+
+        public:
+            __device__ __forceinline__  WorkTargetSplit(dev::CircularWorklist<T>& remote_input, dev::CircularWorklist<T>& remote_output, DWCallbacks& callbacks) :
+                m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
+
+            __device__ __forceinline__ void append_work(const T& unpacked)
+            {
+                SplitFlags flags = m_callbacks.on_send(unpacked);
+                if (flags & SF_Take)
+                {
+                    m_remote_input.prepend_warp(unpacked); // prepending to input 
+                }
+
+                if (flags & SF_Pass)
+                {
+                    // pack data
+                    T packed = m_callbacks.pack(unpacked);
+                    m_remote_output.append_warp(packed); // appending  
+                }
+            }
+        };
+    }
 
     // Three different kernel fusion working schemes: Never stop, Run N times, 
     // and Run for N cycles
@@ -72,7 +184,6 @@ namespace groute
             return (clock64() > m_target);
         }
     };
-
 
     template <typename T, typename DWCallbacks, typename TPrio>
     __device__ void SplitDeferredWork(DWCallbacks& callbacks, TPrio priority_threshold,
@@ -116,7 +227,7 @@ namespace groute
 
     template <typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
         typename DWCallbacks, typename Work, typename... WorkArgs>
-        __global__ void FusedWork(dev::Worklist<TLocal>           immediate_worklist,
+        __global__ void FusedWorkKernel(dev::Worklist<TLocal>           immediate_worklist,
                                   dev::Worklist<TLocal>           deferred_worklist,
                                   dev::CircularWorklist<TLocal>   remote_input,
                                   dev::CircularWorklist<TRemote>  remote_output,
@@ -177,9 +288,9 @@ namespace groute
 
                 // Perform work chunk
                 int cur_chunk = min(immediate_worklist.len() - chunk, chunk_size);
-                Work::work(groute::dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
-                    remote_input,  // prepending local work here 
-                    remote_output, // appending remote work here
+                Work::work(
+                    dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
+                    dev::WorkTargetSplit<TLocal, TRemote, DWCallbacks>(remote_input, remote_output, callbacks),
                     args...
                     );
 
@@ -213,4 +324,4 @@ namespace groute
     }
 }
 
-#endif //  __GROUTE_FUSED_WORKER_CUH
+#endif //  __GROUTE_WORK_KERNELS_CUH

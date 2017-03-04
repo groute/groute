@@ -153,6 +153,7 @@ namespace groute {
         }
     }
 
+    template<typename TLocal, typename TRemote>
     struct IDistributedWorklist
     {
         virtual ~IDistributedWorklist() { }
@@ -163,6 +164,8 @@ namespace groute {
         virtual int GetPriorityThreshold() = 0;
         virtual bool HasWork() const = 0;
         
+        virtual Link<TRemote>& GetLink(Endpoint source) = 0;
+
         std::mutex log_gate;
     };
 
@@ -192,15 +195,12 @@ namespace groute {
     };
 
     template<typename TLocal, typename TRemote, typename DWCallbacks>
-    class DistributedWorklist;
-
-    template<typename TLocal, typename TRemote, typename DWCallbacks>
     class DistributedWorklistPeer : public IDistributedWorklistPeer < TLocal, TRemote >
     {
-        friend class DistributedWorklist < TLocal, TRemote, DWCallbacks > ;
+        friend class IDistributedWorklist < TLocal, TRemote > ;
 
         Context& m_context;
-        IDistributedWorklist& m_distributed_worklist;
+        IDistributedWorklist < TLocal, TRemote >& m_distributed_worklist;
 
         Endpoint m_endpoint;
         size_t m_chunk_size, m_num_buffers, m_num_workspaces;
@@ -432,6 +432,7 @@ namespace groute {
             }
         }
         
+    public: // TODO
         void InitWorklists()
         {
             void* mem_buffer;
@@ -471,7 +472,7 @@ namespace groute {
         }
     public:
         DistributedWorklistPeer(
-            Context& context, Router<TRemote>& router, IDistributedWorklist& distributed_worklist,
+            Context& context, Router<TRemote>& router, IDistributedWorklist < TLocal, TRemote >& distributed_worklist,
             int priority_threshold, const DWCallbacks& device_callbacks,
             Endpoint endpoint, size_t chunk_size, size_t num_buffers, size_t num_workspaces)
             :
@@ -576,18 +577,21 @@ namespace groute {
         }
     };
 
-    template<typename TLocal, typename TRemote, typename DWCallbacks>
-    class DistributedWorklist : public IDistributedWorklist
+    template<typename TLocal, typename TRemote, typename DWCallbacks, typename TWorker>
+    class DistributedWorklist : public IDistributedWorklist < TLocal, TRemote >
     {
     private:
         typedef DistributedWorklistPeer<TLocal, TRemote, DWCallbacks> PeerType;
+        typedef TWorker WorkerType;
 
         Context& m_context;
         Router<TRemote> m_router;
 
-        EndpointList m_workers; // Worker endpoints  
-        std::map<Endpoint, std::unique_ptr<PeerType> > m_peers; // DW peer per worker
-        std::map<Endpoint, Link<TRemote> > m_links; // Link per source
+        EndpointList m_source_endpoints, m_work_endpoints; // Source and Work endpoints  
+        std::map<Endpoint, std::unique_ptr<PeerType> > m_peers; // DW peer per work endpoint
+        std::map<Endpoint, std::unique_ptr<WorkerType> > m_workers; // Worker per work endpoint
+
+        std::map<Endpoint, Link<TRemote> > m_links; // Link per source endpoint  
 
         std::atomic<int> m_current_work_counter;
         std::atomic<int> m_deferred_work_counter;
@@ -606,8 +610,8 @@ namespace groute {
             Context& context, const EndpointList& sources, const EndpointList& workers, const std::map<Endpoint, DWCallbacks>& callbacks, 
             size_t chunk_size, size_t num_buffers, int priority_delta = 0) :
             m_context(context), m_router(context, Policy::CreateRingPolicy(workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
-            m_workers(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(priority_delta), 
-            m_current_threshold(priority_delta == 0 ? INT32_MAX : priority_delta), m_total_work(0)
+            m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
+            m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0)
         {
             if (workers.size() != callbacks.size()) throw std::exception("DW parameter mismatch (workers <-> callbacks)");
 
@@ -616,6 +620,10 @@ namespace groute {
                 printf(
                     "DW configuration: chunk: %llu, buffers: %llu, priority -> [delta: %d, initial threshold: %d]\n", 
                     chunk_size, num_buffers, priority_delta, m_current_threshold);
+                if (!WorkerType::soft_prio)
+                {
+                    printf("Note: the used TWorker type does not support soft priority scheduling\n");
+                }
             }
 
             for (Endpoint source : sources)
@@ -624,20 +632,20 @@ namespace groute {
                 m_links[source] = Link<TRemote>(source, m_router);
             }
 
-            for (Endpoint worker : m_workers)
+            for (Endpoint worker : m_work_endpoints)
             {
                 m_endpoint_work[worker] = 0;
                 m_context.SetDevice(worker);
 
                 if (callbacks.find(worker) == callbacks.end()) throw std::exception("DW: missing DWCallbacks for worker");
 
-                auto peer = groute::make_unique< PeerType >(
-                    m_context, m_router, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size, num_buffers, priority_delta == 0 ? 1 : 2);
-                m_peers[worker] = std::move(peer);
+                m_peers[worker] = groute::make_unique< PeerType >(
+                    m_context, m_router, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size, num_buffers, WorkerType::num_workspaces);
+                m_workers[worker] = groute::make_unique< WorkerType >(m_context, worker);
             }
 
-            // Second phase: for allocating available memory for local work-queues after link allocation   
-            for (Endpoint worker : m_workers)
+            // Second phase: reserving available memory for local work-queues after links allocation   
+            for (Endpoint worker : m_work_endpoints)
             {
                 m_peers[worker]->InitWorklists();
             }
@@ -655,16 +663,28 @@ namespace groute {
             }
         }
 
-        Link<TRemote>& GetLink(Endpoint source)
+        Link<TRemote>& GetLink(Endpoint source) override
         {
             if (m_links.find(source) == m_links.end()) throw std::exception("Endpoint not registered as a source");
             return m_links[source];
         }
 
-        IDistributedWorklistPeer<TLocal, TRemote>* GetPeer(Endpoint worker)
+        IDistributedWorklistPeer<TLocal, TRemote>* GetPeer(Endpoint endpoint)
         {
-            if (m_peers.find(worker) == m_peers.end()) throw std::exception("Endpoint not registered as a worker");
-            return m_peers[worker].get();
+            if (m_peers.find(endpoint) == m_peers.end()) throw std::exception("Endpoint not registered as a worker");
+            return m_peers[endpoint].get();
+        }
+
+        WorkerType* GetWorker(Endpoint endpoint)
+        {
+            if (m_workers.find(endpoint) == m_workers.end()) throw std::exception("Endpoint not registered as a worker");
+            return m_workers[endpoint].get();
+        }
+
+        template<typename... WorkArgs>
+        void Work(Endpoint endpoint, Stream& stream, const WorkArgs&... args)
+        {
+            GetWorker(endpoint)->Work(*this, GetPeer(endpoint), stream, args...); // TODO: pass callbacks as well
         }
 
         uint32_t GetCurrentWorkCount(Endpoint endpoint)

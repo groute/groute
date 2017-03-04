@@ -38,12 +38,12 @@
 
 #include <groute/event_pool.h>
 #include <groute/distributed_worklist.h>
-#include <groute/fused_worker.h>
+#include <groute/work_kernels.h>
 #include <groute/cta_work.h>
 
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal_algo.h>
-#include <groute/graphs/fused_solver.h>
+#include <groute/graphs/traversal.h>
+#include <groute/workers.h>
 
 #include <utils/parser.h>
 #include <utils/utils.h>
@@ -427,7 +427,7 @@ namespace pr {
                 {
                     if (FLAGS_cta_np)
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::NeverStop, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkTypeCTA,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
@@ -446,7 +446,7 @@ namespace pr {
                     }
                     else
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::NeverStop, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkType,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
@@ -469,7 +469,7 @@ namespace pr {
                 {
                     if (FLAGS_cta_np)
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkTypeCTA,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
@@ -488,7 +488,7 @@ namespace pr {
                     }
                     else
                     {
-                        groute::FusedWork <
+                        groute::FusedWorkKernel <
                             groute::RunNTimes<1>, local_work_t, remote_work_t, rank_t, DWCallbacks,
                             WorkType,
                             TGraph, RankDatum<rank_t>, ResidualDatum<rank_t> >
@@ -568,7 +568,7 @@ bool TestPageRankAsyncMultiOptimized(int ngpus)
     typedef groute::graphs::multi::NodeOutputLocalDatum<rank_t> RankDatum;
     
     typedef pr::opt::FusedProblem<groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum, groute::graphs::dev::GraphDatumSeg> ProblemType;
-    typedef groute::graphs::traversal::FusedSolver<
+    typedef groute::graphs::traversal::FusedWorker<
         pr::opt::Algo, ProblemType, 
         pr::opt::local_work_t , pr::opt::remote_work_t, rank_t, 
         pr::opt::DWCallbacks, 
