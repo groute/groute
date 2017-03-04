@@ -114,6 +114,5 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="bfs_async.cu" />
-    <CudaCompile Include="bfs_async_opt.cu" />
   </ItemGroup>
 </Project>
