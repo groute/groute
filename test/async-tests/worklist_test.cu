@@ -222,7 +222,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             auto& input_worklist = worklist_peer->GetLocalInputWorklist(); 
 
             input_seg.Wait(stream.cuda_stream);
-            worklist_peer->PerformSplitSend(input_seg, stream);
+            worklist_peer->SplitSend(input_seg, stream);
 
             while (true)
             {

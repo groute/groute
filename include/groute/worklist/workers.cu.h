@@ -357,7 +357,7 @@ namespace groute {
 
                     auto output_seg = workspace.ToSeg(stream);
                     new_work += output_seg.GetSegmentSize(); // add the new work 
-                    peer->PerformSplitSend(output_seg, stream); // call split-send
+                    peer->SplitSend(output_seg, stream); // call split-send
 
                     workspace.ResetAsync(stream.cuda_stream); // reset the temp output worklist  
 

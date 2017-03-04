@@ -126,13 +126,13 @@ namespace sssp {
                                 if (is_owned)
                                 {
                                     int high_leader = __ffs(owned_mask) - 1;
-                                    int thread_offset = __popc(owned_mask & ((1 << lane_id()) - 1));
+                                    int thread_offset = __popc(owned_mask & ((1 << cub::LaneId()) - 1));
                                     rwl_in.prepend_warp(dest, high_leader, __popc(owned_mask), thread_offset);
                                 }
                                 else
                                 {
                                     int low_leader = __ffs(remote_mask) - 1;
-                                    int thread_offset = __popc(remote_mask & ((1 << lane_id()) - 1));
+                                    int thread_offset = __popc(remote_mask & ((1 << cub::LaneId()) - 1));
                                     rwl_out.append_warp(DistanceData(dest, distance + weight), low_leader, __popc(remote_mask), thread_offset);
                                 }
                             }
@@ -181,13 +181,13 @@ namespace sssp {
                             if (is_owned)
                             {
                                 int high_leader = __ffs(owned_mask) - 1;
-                                int thread_offset = __popc(owned_mask & ((1 << lane_id()) - 1));
+                                int thread_offset = __popc(owned_mask & ((1 << cub::LaneId()) - 1));
                                 rwl_in.prepend_warp(dest, high_leader, __popc(owned_mask), thread_offset);
                             }
                             else
                             {
                                 int low_leader = __ffs(remote_mask) - 1;
-                                int thread_offset = __popc(remote_mask & ((1 << lane_id()) - 1));
+                                int thread_offset = __popc(remote_mask & ((1 << cub::LaneId()) - 1));
                                 rwl_out.append_warp(DistanceData(dest, distance + weight), low_leader, __popc(remote_mask), thread_offset);
                             }
                         }

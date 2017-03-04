@@ -37,7 +37,7 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
-#include <groute/worklist/work_queue.cu.h>
+#include <cub/util_ptx.cuh>
 
 
 //#define NO_CTA_WARP_INTRINSICS 

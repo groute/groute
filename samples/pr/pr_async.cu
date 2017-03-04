@@ -599,7 +599,7 @@ namespace pr
                 "PR", endpoint
                 );
 
-            worklist_peer->PerformSplitSend(seg1, stream); // call split-send
+            worklist_peer->SplitSend(seg1, stream); // call split-send
             
             temp_worklist.ResetAsync(stream.cuda_stream); // reset the temp output worklist
 
@@ -619,7 +619,7 @@ namespace pr
                 "PR", endpoint
                 );
 
-            worklist_peer->PerformSplitSend(seg2, stream); // call split-send
+            worklist_peer->SplitSend(seg2, stream); // call split-send
             
             int iteration = 0;
             int async_iteration_factor = 3;
@@ -656,7 +656,7 @@ namespace pr
                     "PR", endpoint
                     );
 
-                worklist_peer->PerformSplitSend(output_seg, stream); // call split-send 
+                worklist_peer->SplitSend(output_seg, stream); // call split-send 
 
                 if (iteration++ == max_iterations) {
                     //distributed_worklist.ReportPeerTermination();

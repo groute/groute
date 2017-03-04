@@ -49,19 +49,16 @@
 #define TID_1D (threadIdx.x + blockIdx.x * blockDim.x)
 #define TOTAL_THREADS_1D (gridDim.x * blockDim.x)
 
-__device__ __forceinline__ int lane_id() { return threadIdx.x & (WARP_SIZE-1); }
-
-// TODO: Wrap ballot functionality
-__device__ __forceinline__ void warp_active_count(int &first, int& offset, int& total) {
-    unsigned int active = __ballot(1);
-    total = __popc(active);
-    offset = __popc(active & cub::LaneMaskLt());
-    first = __ffs(active) - 1;
-}
-
 
 namespace groute {
     namespace dev {
+
+        __device__ __forceinline__ void warp_active_count(int &first, int& offset, int& total) {
+            unsigned int active = __ballot(1);
+            total = __popc(active);
+            offset = __popc(active & cub::LaneMaskLt());
+            first = __ffs(active) - 1;
+        }
 
         //
         // worklist classes (device):
@@ -104,7 +101,7 @@ namespace groute {
             {
                 uint32_t allocation = 0;
 
-                if (lane_id() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // the leader thread  
                 {
                     allocation = atomicAdd((uint32_t *)m_count, warp_count);
                     assert(allocation + warp_count <= m_capacity);
@@ -196,7 +193,7 @@ namespace groute {
             {
                 uint32_t allocation = 0;
 
-                if (lane_id() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // the leader thread  
                 {
                     allocation = atomicAdd((uint32_t *)m_alloc_end, warp_count);
                     assert((allocation + warp_count) - *m_start < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
@@ -245,7 +242,7 @@ namespace groute {
             {
                 uint32_t allocation = 0;
 
-                if (lane_id() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // the leader thread  
                 {
                     allocation = atomicSub((uint32_t *)m_start, warp_count) - warp_count; // allocate 'total' items from the start
                     assert(*m_end - allocation < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));

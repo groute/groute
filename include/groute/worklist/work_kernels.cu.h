@@ -34,10 +34,11 @@
 
 #include <cub/grid/grid_barrier.cuh>
 
-#include <groute/worklist/work_queue.cu.h>
+#include <groute/device/signal.cu.h>
+#include <groute/device/queue.cu.h>
+
 #include <groute/worklist/work_source.cu.h>
 #include <groute/worklist/work_target.cu.h>
-#include <groute/device/signal.cu.h>
 
 #define GTID (blockIdx.x * blockDim.x + threadIdx.x)
 
@@ -103,13 +104,13 @@ namespace groute
             if (is_immediate_work)
             {
                 int high_leader = __ffs(immediate_mask) - 1;
-                int thread_offset = __popc(immediate_mask & ((1 << lane_id()) - 1));
+                int thread_offset = __popc(immediate_mask & ((1 << cub::LaneId()) - 1));
                 immediate_worklist.append_warp(work, high_leader, __popc(immediate_mask), thread_offset);
             }
             else
             {
                 int low_leader = __ffs(deferred_mask) - 1;
-                int thread_offset = __popc(deferred_mask & ((1 << lane_id()) - 1));
+                int thread_offset = __popc(deferred_mask & ((1 << cub::LaneId()) - 1));
                 deferred_worklist.append_warp(work, low_leader, __popc(deferred_mask), thread_offset);
             }
         }

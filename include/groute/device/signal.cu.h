@@ -30,7 +30,7 @@
 #ifndef __GROUTE_DEVICE_SIGNAL_H
 #define __GROUTE_DEVICE_SIGNAL_H
 
-#include <groute/worklist/work_queue.cu.h>
+#include <groute/device/queue.cu.h>
 #include <thread>
 
 namespace groute {

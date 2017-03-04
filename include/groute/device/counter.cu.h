@@ -30,7 +30,7 @@
 #ifndef __GROUTE_DEVICE_COUNTER_H
 #define __GROUTE_DEVICE_COUNTER_H
 
-#include <groute/worklist/work_queue.cu.h>
+#include <groute/device/queue.cu.h>
 
 namespace groute {
     namespace dev {
@@ -53,7 +53,7 @@ namespace groute {
                 int lanemask = __ballot(1);
                 int leader = __ffs(lanemask) - 1;
                     
-                if (lane_id() == leader) {
+                if (cub::LaneId() == leader) {
                     int amount = __popc(lanemask);
                     atomicAdd(m_counter, amount);
                 }

@@ -97,9 +97,6 @@
     <ClInclude Include="..\..\include\groute\worklist\work_kernels.cu.h">
       <Filter>groute\worklist</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\work_queue.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\worklist\work_source.cu.h">
       <Filter>groute\worklist</Filter>
     </ClInclude>
@@ -119,6 +116,12 @@
       <Filter>groute\device</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\device\signal.cu.h">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\worklist\split_kernels.cu.h">
+      <Filter>groute\worklist</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\queue.cu.h">
       <Filter>groute\device</Filter>
     </ClInclude>
   </ItemGroup>

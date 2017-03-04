@@ -40,8 +40,11 @@
 #include <gflags/gflags_declare.h>
 
 #include <groute/groute.h>
-#include <groute/worklist/work_queue.cu.h>
+
+#include <groute/device/queue.cu.h>
 #include <groute/device/counter.cu.h>
+
+#include <groute/worklist/split_kernels.cu.h>
 
 DECLARE_bool(verbose);
 DECLARE_bool(count_work);
@@ -52,105 +55,6 @@ DECLARE_double(wl_alloc_factor_out);
 DECLARE_double(wl_alloc_factor_pass);
 
 namespace groute {
-
-    /*
-    Bitmap flags for split kernels
-    */
-    enum SplitFlags
-    {
-        SF_None = 0,
-        SF_Take = 1 << 0,
-        SF_Pass = 1 << 1,
-    };
-
-    /*
-    template<typename TUnpacked, typename TPacked>
-    struct DWCallbacks // an example for the required format
-    {
-        SplitFlags on_receive(const TPacked& data);
-        SplitFlags on_send(const TUnpacked& data);
-
-        TPacked pack(const TUnpacked& data);
-        TUnpacked unpack(const TPacked& data);
-
-        bool should_defer(TUnpacked work, TPrio global_threshold)
-    };
-    */
-
-    template<typename TLocal, typename TRemote, typename DWCallbacks>
-    __global__ void SplitSendKernel(
-        DWCallbacks callbacks, TLocal* work_ptr, uint32_t work_size,
-        dev::CircularWorklist<TLocal> local_work, dev::CircularWorklist<TRemote> remote_work)
-    {
-        int tid = TID_1D;
-        if (tid < work_size)
-        {
-            TLocal work = work_ptr[tid];
-            SplitFlags flags = callbacks.on_send(work);
-
-            // no filter counter here
-
-            if (flags & SF_Take)
-            {
-                local_work.prepend_warp(work); // notice the prepend  
-            }
-
-            if (flags & SF_Pass)
-            {
-                // pack data
-                TRemote packed = callbacks.pack(work);
-                remote_work.append_warp(packed); // notice the append  
-            }
-        }
-    }
-
-    template<typename TLocal, typename TRemote, typename DWCallbacks>
-    __global__ void SplitReceiveKernel(
-        DWCallbacks callbacks,
-        TRemote* work_ptr, uint32_t work_size,
-        dev::CircularWorklist<TLocal> local_work,
-        dev::CircularWorklist<TRemote> remote_work,
-        dev::Counter filter_counter
-        )
-    {
-        int tid = TID_1D;
-        if (tid < work_size)
-        {
-            TRemote work = work_ptr[tid];
-            SplitFlags flags = callbacks.on_receive(work);
-
-            int filter_mask = __ballot(flags == SF_None ? 1 : 0);
-            int take_mask = __ballot(flags & SF_Take ? 1 : 0);
-            int pass_mask = __ballot(flags & SF_Pass ? 1 : 0);
-            // never inline the masks into the conditional branching below  
-            // although it may work. The compiler should optimize this anyhow, 
-            // but this avoids it from unifying the __ballot's 
-
-            if (flags == SF_None)
-            {
-                int filter_leader = __ffs(filter_mask) - 1;
-                if (lane_id() == filter_leader)
-                    filter_counter.add(__popc(filter_mask));
-            }
-            else
-            {
-                if (flags & SF_Take)
-                {
-                    int take_leader = __ffs(take_mask) - 1;
-                    int thread_offset = __popc(take_mask & ((1 << lane_id()) - 1));
-                    local_work.append_warp(callbacks.unpack(work), take_leader, __popc(take_mask), thread_offset);
-                }
-
-                if (flags & SF_Pass)
-                    // pass on to another endpoint
-                {
-                    int pass_leader = __ffs(pass_mask) - 1;
-                    int thread_offset = __popc(pass_mask & ((1 << lane_id()) - 1));
-                    remote_work.append_warp(work, pass_leader, __popc(pass_mask), thread_offset);
-                }
-            }
-        }
-    }
 
     template<typename TLocal, typename TRemote>
     struct IDistributedWorklist
@@ -190,13 +94,14 @@ namespace groute {
 
         /// Perform split-send, local work will be prepended into the LocalInputWorklist
         /// and remote work will be appended into the RemoteOutputWorklist (+SignalRemoteWork)  
-        virtual void PerformSplitSend(Segment<TLocal>& split_work, Stream& stream) = 0;
+        virtual void SplitSend(Segment<TLocal>& split_work, Stream& stream) = 0;
     };
 
     template<typename TLocal, typename TRemote, typename DWCallbacks>
     class DistributedWorklistPeer : public IDistributedWorklistPeer < TLocal, TRemote >
     {
-        friend class IDistributedWorklist < TLocal, TRemote > ;
+        template<typename TL, typename TR, typename DWC, typename TW>
+        friend class DistributedWorklist;
 
         Context& m_context;
         IDistributedWorklist < TLocal, TRemote >& m_distributed_worklist;
@@ -245,7 +150,7 @@ namespace groute {
 
         Link<TRemote> m_link_in, m_link_out;
 
-        void SplitReceive(
+        void InvokeSplitReceive(
             const Segment<TRemote>& received_work, Stream& stream)
         {
             m_filter_counter.ResetAsync(stream.cuda_stream);
@@ -283,7 +188,7 @@ namespace groute {
                 );
         }
 
-        void SplitSend(
+        void InvokeSplitSend(
             const Segment<TLocal>& sent_work, Stream& stream)
         {
             dim3 block_dims(DBS, 1, 1);
@@ -314,11 +219,6 @@ namespace groute {
                 auto seg = fut.get();
                 if (seg.Empty()) break;
 
-                //{
-                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
-                //    printf("Receive (%d) | got: %llu\n", (Endpoint::identity_type)m_endpoint, seg.GetSegmentSize());
-                //}
-
                 size_t pop_count = 0;
                 while (!pops.empty() && groute::is_ready(pops.front().future)) // Loop over 'ready' (future, Event) pairs
                 {
@@ -346,16 +246,11 @@ namespace groute {
 
                 }
                 
-                //if (pop_count > 0)
-                //{
-                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
-                //    printf("Receive (%d) | pop: %llu\n", (Endpoint::identity_type)m_endpoint, pop_count);
-                //}
                 m_pass_worklist.PopItemsAsync(pop_count, stream);
 
                 // Queue a segment-wait on stream
                 seg.Wait(stream);
-                SplitReceive(seg, stream);
+                InvokeSplitReceive(seg, stream);
 
                 auto ev = m_context.RecordEvent(m_endpoint, stream);
 
@@ -423,15 +318,9 @@ namespace groute {
                 auto e = pop.future.get();
                 e.Wait(stream);
                 m_send_worklist.PopItemsAsync(pop.size, stream);
-
-                //{
-                //    std::lock_guard<std::mutex> guard(m_distributed_worklist.log_gate);
-                //    printf("Send (%d) | pop: %llu\n", (Endpoint::identity_type)m_endpoint, pop.size);
-                //}
             }
         }
         
-    public: // TODO
         void InitWorklists()
         {
             void* mem_buffer;
@@ -557,11 +446,11 @@ namespace groute {
             }
         }
         
-        void PerformSplitSend(Segment<TLocal>& split_work, Stream& stream) override
+        void SplitSend(Segment<TLocal>& split_work, Stream& stream) override
         {
             if (split_work.Empty()) return;
 
-            SplitSend(split_work, stream);
+            InvokeSplitSend(split_work, stream);
             SignalRemoteWork(m_context.RecordEvent(m_endpoint, stream));
         }
 

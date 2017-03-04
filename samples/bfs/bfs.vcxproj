@@ -183,6 +183,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\context.h" />
     <ClInclude Include="..\..\include\groute\device\counter.cu.h" />
     <ClInclude Include="..\..\include\groute\device\cta_scheduler.cu.h" />
+    <ClInclude Include="..\..\include\groute\device\queue.cu.h" />
     <ClInclude Include="..\..\include\groute\device\signal.cu.h" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
     <ClInclude Include="..\..\include\groute\graphs\common.h" />
@@ -198,9 +199,9 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\policy.h" />
     <ClInclude Include="..\..\include\groute\router.h" />
     <ClInclude Include="..\..\include\groute\worklist\distributed_worklist.cu.h" />
+    <ClInclude Include="..\..\include\groute\worklist\split_kernels.cu.h" />
     <ClInclude Include="..\..\include\groute\worklist\workers.cu.h" />
     <ClInclude Include="..\..\include\groute\worklist\work_kernels.cu.h" />
-    <ClInclude Include="..\..\include\groute\worklist\work_queue.cu.h" />
     <ClInclude Include="..\..\include\groute\worklist\work_source.cu.h" />
     <ClInclude Include="..\..\include\groute\worklist\work_target.cu.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h" />
