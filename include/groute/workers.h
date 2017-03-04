@@ -46,13 +46,63 @@ DEFINE_int32(fused_chunk_size, INT_MAX, "Intermediate peer transfer");
 
 namespace groute {
 
+    // Templated APIs:
     /*
-    Worker API:
-    Work API:
+
+    ----
+
+    DistributedWorklist Worker API: (two types provided by the library, fused and unopt, below)
+    struct Worker
+    {
+    public:
+        static const int num_workspaces = ...;    
+        static const bool soft_prio = ...;
+
+        Worker(Context& context, Endpoint endpoint) { ... }
+        void Work(
+            DistributedWorklist& distributed_worklist,
+            DistributedWorklistPeer* peer, Stream& stream, const WorkArgs&... args)
+        { 
+            ...
+        }
+    };
+
+    ----
+
     WorkSource API:
+    struct WorkSource
+    {
+        __device__ uint32_t get_size() const { return ...; }
+        __device__ T get_work(uint32_t i) const { return ...; }
+    };
+
+    ----
+
     WorkTarget API:
+    template<typename TLocal, typename TRemote>
+    struct WorkTarget
+    {
+        __device__ void append_work(const TLocal& work) { ... }
+        __device__ void append_work(const TRemote& work) { ... }
+    };
+
+    ----
+
+    Work API: (user application needs to implement this)
+    struct Work
+    {
+        template<typename WorkSource, typename WorkTarget, typename... WorkArgs>
+        __device__ static void work(
+            const WorkSource& work_source, WorkTarget& work_target,
+            WorkArgs&... args
+            )
+        { ... }
+    };
     */
 
+    /*
+    * @brief An optimized DW worker, with complete kernel fusion and soft-priority scheduling   
+    */
     template<bool IterationFusion, typename TLocal, typename TRemote, typename TPrio, typename DWCallbacks, typename TWork, typename... WorkArgs>
     class FusedWorker
     {
@@ -69,7 +119,8 @@ namespace groute {
             DEFERRED_COUNTER = 1,
             BLOCK_SIZE = 256 
         };
-        static char* NAME() { return "FUSED_WORKER"; }
+        static char* WorkerName() { return "FusedWorker"; }
+        static char* KernelName() { return "FusedWorkKernel"; }
 
         Endpoint m_endpoint;
         
@@ -177,7 +228,7 @@ namespace groute {
 
                 if (FLAGS_count_work)
                 {
-                    //Marker::MarkWorkitems(distributed_worklist.GetCurrentWorkCount(m_endpoint), NAME);
+                    //Marker::MarkWorkitems(distributed_worklist.GetCurrentWorkCount(m_endpoint), KernelName());
                 }
                 
                 groute::FusedWorkKernel <StoppingCondition, TLocal, TRemote, TPrio, DWCallbacks, TWork, WorkArgs... >
@@ -202,7 +253,7 @@ namespace groute {
                     if (signal == prev_signal) break; // Exit was signaled  
 
                     int work = signal - prev_signal;
-                    distributed_worklist.ReportWork(work, 0, NAME(), m_endpoint);
+                    distributed_worklist.ReportWork(work, 0, WorkerName(), m_endpoint);
 
                     prev_signal = signal; // Update
                     peer->SignalRemoteWork(Event()); // Trigger work sending to router
@@ -211,14 +262,14 @@ namespace groute {
                 stream.EndSync(); // Sync on the kernel        
 
                 // Some work was done by the kernel, report it   
-                distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, NAME(), m_endpoint);
-                distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, NAME(), m_endpoint);
+                distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, WorkerName(), m_endpoint);
+                distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, WorkerName(), m_endpoint);
 
                 if (FLAGS_verbose)
                 {
                     printf(
                         "%d - done kernel, LWC: %d, HWC: %d\n", 
-                        (groute::Endpoint::identity_type)m_endpoint, *m_work_counters[DEFERRED_COUNTER], *m_work_counters[IMMEDIATE_COUNTER]);
+                        (Endpoint::identity_type)m_endpoint, *m_work_counters[DEFERRED_COUNTER], *m_work_counters[IMMEDIATE_COUNTER]);
                 }
 
                 if (FLAGS_count_work)
@@ -238,7 +289,7 @@ namespace groute {
 
                     printf(
                         "%d - after wait, segs_total: %d, prev prio: %d, curr prio: %d\n", 
-                        (groute::Endpoint::identity_type)m_endpoint, segs_size, priority_threshold, distributed_worklist.GetPriorityThreshold());
+                        (Endpoint::identity_type)m_endpoint, segs_size, priority_threshold, distributed_worklist.GetPriorityThreshold());
                 }
 
                 if (priority_threshold < distributed_worklist.GetPriorityThreshold()) // priority is up
@@ -251,10 +302,80 @@ namespace groute {
         }
     };
 
-    //class Worker
-    //{
-    //    
-    //};
+    /*
+    * @brief A simple unoptimized DW worker 
+    */
+    template<typename TLocal, typename TRemote, typename DWCallbacks, typename TWork, typename... WorkArgs>
+    class Worker
+    {
+        Endpoint m_endpoint;
+
+        static char* WorkerName() { return "UnoptimizedWorker"; }
+        static char* KernelName() { return "WorkKernel"; }
+        
+    public:
+        static const int num_workspaces = 1;    
+        static const bool soft_prio = false;
+
+        Worker(Context& context, Endpoint endpoint) : m_endpoint(endpoint) { }
+                
+        void Work(
+            IDistributedWorklist <TLocal, TRemote>& distributed_worklist,
+            IDistributedWorklistPeer <TLocal, TRemote>* peer, Stream& stream, const WorkArgs&... args)
+        {
+                auto& input_worklist = peer->GetLocalInputWorklist();
+                auto& workspace = peer->GetLocalWorkspace(0); 
+
+                while (distributed_worklist.HasWork())
+                {
+                    auto input_segs = peer->WaitForLocalWork(stream);
+                    size_t new_work = 0, performed_work = 0;
+
+                    if (input_segs.empty()) continue;
+
+                    // If circular queue passed the end, 2 buffers will be given: [s,capacity) and [0,e)
+                    for (auto subseg : input_segs)
+                    {
+                        dim3 grid_dims, block_dims;
+                        KernelSizing(grid_dims, block_dims, subseg.GetSegmentSize());
+
+                        Marker::MarkWorkitems(subseg.GetSegmentSize(), KernelName());
+                        WorkKernel <dev::WorkSourceArray<index_t>, TLocal, TRemote, DWCallbacks, TWork, WorkArgs...>
+
+                            <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
+
+                                dev::WorkSourceArray<index_t>(subseg.GetSegmentPtr(), subseg.GetSegmentSize()),
+                                workspace.DeviceObject(),
+                                DWCallbacks(args...),
+                                args...
+                                );
+
+                        input_worklist.PopItemsAsync(subseg.GetSegmentSize(), stream.cuda_stream);
+                        performed_work += subseg.GetSegmentSize();
+                    }
+
+                    auto output_seg = workspace.ToSeg(stream);
+                    new_work += output_seg.GetSegmentSize(); // add the new work 
+                    peer->PerformSplitSend(output_seg, stream); // call split-send
+
+                    workspace.ResetAsync(stream.cuda_stream); // reset the temp output worklist  
+
+#ifndef NDEBUG  
+                    if (FLAGS_debug_print)
+                    {
+                        std::unique_lock<std::mutex> guard(distributed_worklist.log_gate);
+                        printf("\n\n\tDevice: %d\n%s->Input: ", (groute::Endpoint::identity_type)m_endpoint, WorkerName());
+                        input_worklist.PrintOffsetsDebug(stream);
+                        printf("\n%s->Output: ", WorkerName());
+                        workspace.PrintOffsetsDebug(stream);
+                    }
+#endif
+
+                    // report work
+                    distributed_worklist.ReportWork((int)new_work, (int)performed_work, WorkerName(), m_endpoint);
+                }
+            }
+    };
 }
 
 #endif // __GROUTE_WORKERS_H

@@ -620,10 +620,11 @@ namespace groute {
                 printf(
                     "DW configuration: chunk: %llu, buffers: %llu, priority -> [delta: %d, initial threshold: %d]\n", 
                     chunk_size, num_buffers, priority_delta, m_current_threshold);
-                if (!WorkerType::soft_prio)
-                {
-                    printf("Note: the used TWorker type does not support soft priority scheduling\n");
-                }
+            }
+
+            if (priority_delta > 0 && !WorkerType::soft_prio)
+            {
+                printf("Note: the used TWorker type does not support soft priority scheduling\n");
             }
 
             for (Endpoint source : sources)

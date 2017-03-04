@@ -289,7 +289,17 @@ bool TestBFSAsyncMultiOptimized(int ngpus)
 
 bool TestBFSAsyncMulti(int ngpus)
 {
-    return true;
+    typedef groute::Worker <
+        bfs::opt::local_work_t, bfs::opt::remote_work_t, bfs::opt::DWCallbacks, bfs::opt::BFSWorkCTA, 
+        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> WorkerType;
+
+    groute::graphs::traversal::__MultiRunner__ <
+        bfs::opt::Algo, WorkerType, bfs::opt::DWCallbacks, bfs::opt::local_work_t, bfs::opt::remote_work_t,
+        groute::graphs::multi::NodeOutputGlobalDatum<level_t> > runner;
+    
+    groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
+    
+    return runner(ngpus, FLAGS_prio_delta, levels_datum);
 }
 
 bool TestBFSSingle()

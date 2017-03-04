@@ -225,7 +225,8 @@ namespace groute
         }
     }
 
-    template <typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
+    template <
+        typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
         typename DWCallbacks, typename Work, typename... WorkArgs>
         __global__ void FusedWorkKernel(dev::Worklist<TLocal>           immediate_worklist,
                                   dev::Worklist<TLocal>           deferred_worklist,
@@ -321,6 +322,21 @@ namespace groute
             *host_current_work_counter = new_immediate_work - performed_immediate_work - prev_immediate_work;
             *host_deferred_work_counter = deferred_worklist.len() - prev_deferred_work;
         }
+    }
+
+
+    template <
+            typename WorkSource, typename TLocal, typename TRemote, 
+            typename DWCallbacks, typename Work, typename... WorkArgs>
+        __global__ void WorkKernel(WorkSource work_source, dev::Worklist<TLocal> output_worklist,
+                                  DWCallbacks       callbacks,
+                                  WorkArgs...       args)
+    {
+        Work::work(
+            work_source,
+            dev::WorkTargetWorklist<TLocal, TRemote, DWCallbacks>(output_worklist, callbacks),
+            args...
+            );
     }
 }
 
