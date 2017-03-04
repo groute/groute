@@ -30,6 +30,94 @@
 #ifndef __GROUTE_WORK_SOURCE_H
 #define __GROUTE_WORK_SOURCE_H
 
+namespace groute {
+    namespace dev {
 
+        /*
+        //
+        // WorkSource classes (device):
+        //
+        API:
+        struct WorkSource
+        {
+            __device__ uint32_t get_size() const { return ...; }
+            __device__ T get_work(uint32_t i) const { return ...; }
+        };
+        */
+
+
+        /*
+        * @brief A work source based on a device array and size
+        */
+        template<typename T>
+        struct WorkSourceArray
+        {
+        private:
+            T* work_ptr;
+            uint32_t work_size;
+
+        public:
+            __host__ __device__ WorkSourceArray(T* work_ptr, uint32_t work_size) :
+                work_ptr(work_ptr), work_size(work_size) { }
+
+            __device__ __forceinline__ T get_work(uint32_t i) const { return work_ptr[i]; }
+            __host__ __device__ __forceinline__ uint32_t get_size() const { return work_size; }
+        };
+
+        /*
+        * @brief A work source based on two device arrays + sizes
+        */
+        template<typename T>
+        struct WorkSourceTwoArrays
+        {
+        private:
+            T* work_ptr1, *work_ptr2;
+            uint32_t work_size1, work_size2;
+
+        public:
+            WorkSourceTwoArrays(T* work_ptr1, uint32_t work_size1, T* work_ptr2, uint32_t work_size2) :
+                work_ptr1(work_ptr1), work_size1(work_size1), work_ptr2(work_ptr2), work_size2(work_size2) { }
+
+            __device__ __forceinline__ T get_work(uint32_t i) { return i < work_size1 ? work_ptr1[i] : work_ptr2[i-work_size1]; }
+            __host__ __device__ __forceinline__ uint32_t get_size() const { return work_size1 + work_size2; }
+        };
+
+        /*
+        * @brief A work source based on a device array and a device counter
+        */
+        template<typename T>
+        struct WorkSourceCounter
+        {
+        private:
+            T* work_ptr;
+            uint32_t* work_counter;
+
+        public:
+            WorkSourceCounter(T* work_ptr, uint32_t* work_counter) :
+                work_ptr(work_ptr), work_counter(work_counter) { }
+
+            __device__ __forceinline__ T get_work(uint32_t i) { return work_ptr[i]; }
+            __device__ __forceinline__ uint32_t get_size() const { return *work_counter; }
+        };
+
+        /*
+        * @brief A work source based on a discrete T range [range, range+size)
+        */
+        template<typename T>
+        struct WorkSourceRange
+        {
+        private:
+            T m_range_start;
+            uint32_t m_range_size;
+
+        public:
+            __host__ __device__ WorkSourceRange(T range_start, uint32_t range_size) :
+                m_range_start(range_start), m_range_size(range_size) { }
+
+            __device__ __forceinline__ T get_work(uint32_t i) const { return (T)(m_range_start + i); }
+            __host__ __device__ __forceinline__ uint32_t get_size() const { return m_range_size; }
+        };
+    }
+}
 
 #endif // __GROUTE_WORK_SOURCE_H

@@ -41,6 +41,7 @@
 
 #include <groute/groute.h>
 #include <groute/worklist/work_queue.cu.h>
+#include <groute/device/counter.cu.h>
 
 DECLARE_bool(verbose);
 DECLARE_bool(count_work);

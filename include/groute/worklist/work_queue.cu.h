@@ -129,43 +129,6 @@ namespace groute {
                 return *m_count;
             }
         };
-        
-
-        class Counter
-        {
-        public:
-            uint32_t* m_counter;
-
-            __host__ __device__ Counter(uint32_t* counter) : 
-                m_counter(counter) { }
-
-            __device__ __forceinline__ void add(uint32_t count)
-            {
-                atomicAdd(m_counter, count); 
-            }
-
-            __device__ __forceinline__ void add_one_warp()
-            {
-                int lanemask = __ballot(1);
-                int leader = __ffs(lanemask) - 1;
-                    
-                if (lane_id() == leader) {
-                    int amount = __popc(lanemask);
-                    atomicAdd(m_counter, amount);
-                }
-            }
-
-            __device__ __forceinline__ void reset()
-            {
-                *m_counter = 0;
-            }
-                        
-            __device__ __forceinline__ uint32_t get_count() const
-            {
-                return *m_counter;
-            }
-        };
-
 
         template<typename T, bool POWER_OF_TWO = true>
         class CircularWorklist
@@ -358,111 +321,6 @@ namespace groute {
                 return prev_start - *m_start;
             }
         };
-        
-        class Signal
-        {
-            volatile int *m_signal_ptr;
-        public:
-
-            __device__ __host__ Signal(volatile int *signal_ptr) : m_signal_ptr(signal_ptr) { }
-
-            __device__ __forceinline__ void increase(int value)
-            {
-                __threadfence_system();
-                *m_signal_ptr = *m_signal_ptr + value;
-            }
-
-            static __device__ __forceinline__ void Increase(volatile int *signal_ptr, int value)
-            {
-                __threadfence_system();
-                *signal_ptr = *signal_ptr + value;
-            }
-
-            static __device__ __forceinline__ void Increment(volatile int *signal_ptr)
-            {
-                __threadfence_system();
-                *signal_ptr = *signal_ptr + 1;
-            }
-        };
-
-
-
-        //
-        // WorkSource classes (device):
-        //
-
-        
-        /*
-        * @brief A work source based on a device array and size
-        */
-        template<typename T>
-        struct WorkSourceArray
-        {
-        private:
-            T* work_ptr;
-            uint32_t work_size;
-
-        public:
-            __host__ __device__ WorkSourceArray(T* work_ptr, uint32_t work_size) :
-                work_ptr(work_ptr), work_size(work_size) { }
-
-            __device__ __forceinline__ T get_work(uint32_t i) const { return work_ptr[i]; }
-            __host__ __device__ __forceinline__ uint32_t get_size() const { return work_size; }
-        };
-
-        /*
-        * @brief A work source based on two device arrays + sizes
-        */
-        template<typename T>
-        struct WorkSourceTwoArrays
-        {
-        private:
-            T* work_ptr1, *work_ptr2;
-            uint32_t work_size1, work_size2;
-
-        public:
-            WorkSourceTwoArrays(T* work_ptr1, uint32_t work_size1, T* work_ptr2, uint32_t work_size2) :
-                work_ptr1(work_ptr1), work_size1(work_size1), work_ptr2(work_ptr2), work_size2(work_size2) { }
-
-            __device__ __forceinline__ T get_work(uint32_t i) { return i < work_size1 ? work_ptr1[i] : work_ptr2[i-work_size1]; }
-            __host__ __device__ __forceinline__ uint32_t get_size() const { return work_size1 + work_size2; }
-        };
-
-        /*
-        * @brief A work source based on a device array and a device counter
-        */
-        template<typename T>
-        struct WorkSourceCounter
-        {
-        private:
-            T* work_ptr;
-            uint32_t* work_counter;
-
-        public:
-            WorkSourceCounter(T* work_ptr, uint32_t* work_counter) :
-                work_ptr(work_ptr), work_counter(work_counter) { }
-
-            __device__ __forceinline__ T get_work(uint32_t i) { return work_ptr[i]; }
-            __device__ __forceinline__ uint32_t get_size() const { return *work_counter; }
-        };
-
-        /*
-        * @brief A work source based on a discrete T range [range, range+size)
-        */
-        template<typename T>
-        struct WorkSourceRange
-        {
-        private:
-            T m_range_start;
-            uint32_t m_range_size;
-
-        public:
-            __host__ __device__ WorkSourceRange(T range_start, uint32_t range_size) :
-                m_range_start(range_start), m_range_size(range_size) { }
-
-            __device__ __forceinline__ T get_work(uint32_t i) const { return (T)(m_range_start + i); }
-            __host__ __device__ __forceinline__ uint32_t get_size() const { return m_range_size; }
-        };
     }
 
 
@@ -488,12 +346,6 @@ namespace groute {
     {
         if (threadIdx.x == 0 && blockIdx.x == 0)
             worklist.append(item);
-    }
-
-    static __global__ void CounterReset(dev::Counter counter)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            counter.reset();
     }
 
     template<typename T>
@@ -656,81 +508,6 @@ namespace groute {
         Segment<T> ToSeg(const Stream& stream) const
         {
             return Segment<T>(GetDataPtr(), GetLength(stream));
-        }
-    };
-
-
-    class Counter
-    {
-        enum { WS = 32 };
-
-        //
-        // device buffer / counters 
-        //
-        uint32_t *m_counters;
-        uint32_t *m_host_counter;
-        int32_t m_current_slot;
-    
-    public:
-        Counter() : m_counters(nullptr), m_current_slot(-1)
-        {
-            Alloc();
-        }
-
-        Counter(const Counter& other) = delete;
-        Counter(Counter&& other) = delete;
-
-        ~Counter()
-        {
-            Free();
-        }
-        
-        typedef dev::Counter DeviceObjectType;
-    
-    private:
-        void Alloc()
-        {
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, WS * sizeof(uint32_t)));
-            GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_counter, sizeof(uint32_t)));
-        }
-    
-        void Free()
-        {
-            GROUTE_CUDA_CHECK(cudaFree(m_counters));
-            GROUTE_CUDA_CHECK(cudaFreeHost(m_host_counter));
-        }
-    
-    public:
-        DeviceObjectType DeviceObject() const
-        {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
-            return dev::Counter(m_counters + m_current_slot);
-        }
-
-        template<typename T>
-        typename Worklist<T>::DeviceObjectType ToDeviceWorklist(T* data_ptr, uint32_t capacity) const
-        {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
-            return dev::Worklist<T>(data_ptr, m_counters + m_current_slot, capacity);
-        }
-
-        void ResetAsync(cudaStream_t stream)
-        {
-            m_current_slot = (m_current_slot + 1) % WS;
-            if (m_current_slot == 0)
-            {
-                ResetCounters <<< 1, WS, 0, stream >>>(m_counters, WS);
-            }
-        }
-        
-        uint32_t GetCount(const Stream& stream) const
-        {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
-
-            GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_counter, m_counters + m_current_slot, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
-            stream.Sync();
-    
-            return *m_host_counter;
         }
     };
 
@@ -1067,56 +844,6 @@ namespace groute {
         std::vector< Segment<T> > ToSegs(const Stream& stream)
         {
             return GetSegs(GetBounds(stream));
-        }
-    };
-
-    class Signal
-    {
-        volatile int * m_signal_host, * m_signal_dev;
-
-    public:
-        typedef dev::Signal DeviceObjectType;
-
-        Signal() 
-        {
-            GROUTE_CUDA_CHECK(cudaMallocHost(&m_signal_host, sizeof(int)));
-            GROUTE_CUDA_CHECK(cudaHostGetDevicePointer(&m_signal_dev, (int*)m_signal_host, 0));
-            *m_signal_host = 0;
-        }
-
-        ~Signal()
-        {
-            GROUTE_CUDA_CHECK(cudaFreeHost((void*)m_signal_host));
-        }
-
-        Signal(const Signal& other) = delete;
-        Signal(Signal&& other) = delete;
-
-        DeviceObjectType DeviceObject() const
-        {
-            return dev::Signal(m_signal_dev);
-        }
-
-        volatile int * GetDevPtr() const { return m_signal_dev; }
-
-        int Peek() const { return *m_signal_host; }
-
-        int WaitForSignal(int prev_signal, Stream& stream)
-        {
-            int signal = *m_signal_host;
-
-            while (signal == prev_signal)
-            {
-                std::this_thread::yield();
-                if (stream.Query()) // Means kernel is done
-                {
-                    signal = *m_signal_host; // Make sure to read any later signal as well
-                    break;
-                }
-
-                signal = *m_signal_host;
-            }
-            return signal;
         }
     };
 }
