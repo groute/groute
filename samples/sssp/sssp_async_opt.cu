@@ -35,12 +35,12 @@
 #include <gflags/gflags.h>
 
 #include <groute/event_pool.h>
-#include <groute/worklist/distributed_worklist.cu.h>
-#include <groute/cta/cta_scheduler.cu.h>
+#include <groute/dwl/distributed_worklist.cuh>
+#include <groute/cta/cta_scheduler.cuh>
 
 #include <groute/graphs/csr_graph.h>
 #include <groute/graphs/traversal.h>
-#include <groute/worklist/workers.cu.h>
+#include <groute/dwl/workers.cuh>
 
 #include <utils/parser.h>
 #include <utils/utils.h>

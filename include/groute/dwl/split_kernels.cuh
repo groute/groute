@@ -32,9 +32,9 @@
 
 #include <vector>
 
-#include <groute/device/queue.cu.h>
-#include <groute/device/signal.cu.h>
-#include <groute/device/counter.cu.h>
+#include <groute/device/queue.cuh>
+#include <groute/device/signal.cuh>
+#include <groute/device/counter.cuh>
 
 namespace groute
 {

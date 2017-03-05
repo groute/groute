@@ -30,8 +30,8 @@
 #ifndef __GROUTE_WORK_TARGET_H
 #define __GROUTE_WORK_TARGET_H
 
-#include <groute/device/queue.cu.h>
-#include <groute/worklist/distributed_worklist.cu.h>
+#include <groute/device/queue.cuh>
+#include <groute/dwl/distributed_worklist.cuh>
 
 namespace groute {
     namespace dev {

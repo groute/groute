@@ -41,10 +41,10 @@
 
 #include <groute/groute.h>
 
-#include <groute/device/queue.cu.h>
-#include <groute/device/counter.cu.h>
+#include <groute/device/queue.cuh>
+#include <groute/device/counter.cuh>
 
-#include <groute/worklist/split_kernels.cu.h>
+#include <groute/dwl/split_kernels.cuh>
 
 DECLARE_bool(verbose);
 DECLARE_bool(count_work);

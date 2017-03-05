@@ -41,7 +41,7 @@
 
 #include <groute/event_pool.h>
 #include <groute/graphs/csr_graph.h>
-#include <groute/worklist/distributed_worklist.cu.h>
+#include <groute/dwl/distributed_worklist.cuh>
 
 #include <utils/parser.h>
 #include <utils/utils.h>

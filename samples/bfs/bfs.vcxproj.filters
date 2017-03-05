@@ -13,14 +13,14 @@
     <Filter Include="groute\graphs">
       <UniqueIdentifier>{d47eafd6-d2b3-4ba2-a305-62eaaef084b6}</UniqueIdentifier>
     </Filter>
-    <Filter Include="groute\worklist">
-      <UniqueIdentifier>{796e08fa-da42-41fe-9514-40e62c5f36e0}</UniqueIdentifier>
-    </Filter>
     <Filter Include="utils\graphs">
       <UniqueIdentifier>{50202d2c-eadd-4951-9549-93c8819ac7e8}</UniqueIdentifier>
     </Filter>
     <Filter Include="groute\device">
       <UniqueIdentifier>{aa1dddda-914f-4f54-9ea5-e95ad1f571b3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\dwl">
+      <UniqueIdentifier>{796e08fa-da42-41fe-9514-40e62c5f36e0}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -91,38 +91,38 @@
     <ClInclude Include="..\..\include\groute\policy.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\distributed_worklist.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\work_kernels.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\work_source.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\work_target.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\workers.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\utils\graphs\traversal.h">
       <Filter>utils\graphs</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\device\counter.cu.h">
+    <ClInclude Include="..\..\include\groute\device\counter.cuh">
       <Filter>groute\device</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cu.h">
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh">
       <Filter>groute\device</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\device\signal.cu.h">
+    <ClInclude Include="..\..\include\groute\device\queue.cuh">
       <Filter>groute\device</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist\split_kernels.cu.h">
-      <Filter>groute\worklist</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\device\queue.cu.h">
+    <ClInclude Include="..\..\include\groute\device\signal.cuh">
       <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh">
+      <Filter>groute\dwl</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

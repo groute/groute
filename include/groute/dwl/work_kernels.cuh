@@ -34,11 +34,11 @@
 
 #include <cub/grid/grid_barrier.cuh>
 
-#include <groute/device/signal.cu.h>
-#include <groute/device/queue.cu.h>
+#include <groute/device/signal.cuh>
+#include <groute/device/queue.cuh>
 
-#include <groute/worklist/work_source.cu.h>
-#include <groute/worklist/work_target.cu.h>
+#include <groute/dwl/work_source.cuh>
+#include <groute/dwl/work_target.cuh>
 
 namespace groute
 {

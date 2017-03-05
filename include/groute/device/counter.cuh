@@ -30,7 +30,7 @@
 #ifndef __GROUTE_DEVICE_COUNTER_H
 #define __GROUTE_DEVICE_COUNTER_H
 
-#include <groute/device/queue.cu.h>
+#include <groute/device/queue.cuh>
 
 namespace groute {
     namespace dev {

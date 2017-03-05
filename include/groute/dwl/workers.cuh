@@ -38,7 +38,7 @@
 #include <cub/grid/grid_barrier.cuh>
 
 #include <groute/context.h>
-#include <groute/worklist/work_kernels.cu.h>
+#include <groute/dwl/work_kernels.cuh>
 
 #include <gflags/gflags.h>
 #include <utils/markers.h>
