@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_GRAPHS_TRAVERSAL_ALGO_H
-#define __GROUTE_GRAPHS_TRAVERSAL_ALGO_H
+#ifndef __GRAPHS_TRAVERSAL_H
+#define __GRAPHS_TRAVERSAL_H
 
 #include <vector>
 #include <map>
@@ -96,13 +96,11 @@ inline void KernelSizing(dim3& grid_dims, dim3& block_dims, uint32_t work_size)
     block_dims = bd;
 }
 
-namespace groute {
-namespace graphs {
-
+namespace utils {
     namespace traversal
     {
         /*
-        * @brief The global context for any traversal solver  
+        * @brief A global context for graph traversal workers
         */
         template<typename Algo>
         class Context : public groute::Context
@@ -122,19 +120,19 @@ namespace graphs {
 
                     switch (FLAGS_gen_method)
                     {
-                    case 1: // no intersection chain 
+                    case 1: // No intersection chain 
                         {
                             groute::graphs::host::NoIntersectionGraphGenerator generator(ngpus, FLAGS_gen_nnodes, FLAGS_gen_factor);
                             generator.Gen(host_graph);
                         }
                         break;
-                    case 2: // chain 
+                    case 2: // Chain 
                         {
                             groute::graphs::host::ChainGraphGenerator generator(ngpus, FLAGS_gen_nnodes, FLAGS_gen_factor);
                             generator.Gen(host_graph);
                         }
                         break;
-                    case 3: // full cliques no intersection 
+                    case 3: // Full cliques no intersection 
                         {
                             groute::graphs::host::CliquesNoIntersectionGraphGenerator generator(ngpus, FLAGS_gen_nnodes, FLAGS_gen_factor);
                             generator.Gen(host_graph);
@@ -142,7 +140,7 @@ namespace graphs {
                         break;
                     default:
                         {
-                            // generates a simple random graph with 'nnodes' nodes and maximum 'gen_factor' neighbors
+                            // Generates a simple random graph with 'nnodes' nodes and maximum 'gen_factor' neighbors
                             groute::graphs::host::CSRGraphGenerator generator(FLAGS_gen_nnodes, FLAGS_gen_factor);
                             generator.Gen(host_graph);
                         }
@@ -213,7 +211,7 @@ namespace graphs {
         };
 
         /*
-        * @brief A raw template for running multi-GPUs traversal solvers
+        * @brief A generic runner for multi-GPU traversal workers
         */
         template<typename Algo, typename TWorker, typename DWCallbacks, typename TLocal, typename TRemote, typename ...TGraphData>
         struct Runner
@@ -238,11 +236,6 @@ namespace graphs {
 
                 dev_graph_allocator.AllocateDatumObjects(args...);
 
-                // currently not use, follow the code into the DistributedWorklistPeer classes
-                //size_t max_work_size = (context.host_graph.nedges / ngpus) * FLAGS_wl_alloc_factor; // (edges / ngpus) is the best approximation we have   
-                //if (FLAGS_wl_alloc_abs > 0)
-                //    max_work_size = FLAGS_wl_alloc_abs;
-
                 size_t num_exch_buffs = (FLAGS_pipe_size <= 0)
                     ? ngpus*FLAGS_pipe_size_factor
                     : FLAGS_pipe_size;
@@ -251,28 +244,16 @@ namespace graphs {
                     : FLAGS_pipe_alloc_size;
 
                 // Prepare DistributedWorklist parameters
-                Endpoint host = Endpoint::HostEndpoint(0);
-                EndpointList worker_endpoints = Endpoint::Range(ngpus);
-                std::map<Endpoint, DWCallbacks> callbacks;
+                groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+                groute::EndpointList worker_endpoints = groute::Endpoint::Range(ngpus);
+                std::map<groute::Endpoint, DWCallbacks> callbacks;
                 for (int i = 0; i < ngpus; ++i)
                 {
                     callbacks[worker_endpoints[i]] = DWCallbacks(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
                 }
 
-                DistributedWorklist<TLocal, TRemote, DWCallbacks, TWorker> distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
-
-                //std::vector< std::unique_ptr<Problem> > problems;
-                //std::vector< std::unique_ptr<Solver> > solvers;
-
-                //for (int i = 0; i < ngpus; ++i)
-                //{
-                //    // Set device for possible internal allocations  
-                //    context.SetDevice(i);
-
-                //    // Allocating problems and solvers here to allow internal device allocations  
-                //    problems.push_back(groute::make_unique<Problem>(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...));
-                //    solvers.push_back(groute::make_unique<Solver>(std::ref(context), std::ref(*problems[i])));
-                //}
+                groute::DistributedWorklist<TLocal, TRemote, DWCallbacks, TWorker> 
+                    distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
                 
                 context.SyncAllDevices(); // Allocations are on default streams, syncing all devices 
 
@@ -284,41 +265,35 @@ namespace graphs {
                     auto dev_func = [&](size_t i)
                     {
                         context.SetDevice(i);
-                        Stream stream = context.CreateStream(i);
-
-                        //Problem& problem = *problems[i];
-                        //Solver& solver = *solvers[i];
-                        //problem.Init(stream);
+                        groute::Stream stream = context.CreateStream(i);
 
                         Algo::DeviceInit(stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
                         stream.Sync();
 
-                        barrier.Sync(); // signal to host
-                        barrier.Sync(); // receive signal from host
-
-                        //solver.Solve(context, i, distributed_worklist, distributed_worklist.GetPeer(i), stream);
+                        barrier.Sync(); // Signal to host
+                        barrier.Sync(); // Receive signal from host
 
                         distributed_worklist.Work(i, stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
-                        barrier.Sync(); // signal to host
+                        barrier.Sync(); // Signal completion to host
                     };
 
                     workers.push_back(std::thread(dev_func, ii));
                 }
 
-                barrier.Sync(); // wait for devices to init 
+                barrier.Sync(); // Wait for devices to init 
 
                 Algo::Init(context, dev_graph_allocator, distributed_worklist); // init from host
                 distributed_worklist.GetLink(host).Shutdown();
 
-                Stopwatch sw(true); // all threads are running, start timing
+                Stopwatch sw(true); // All threads are running, start timing
                 
                 IntervalRangeMarker algo_rng(context.nedges, "begin");
 
-                barrier.Sync(); // signal to devices  
+                barrier.Sync(); // Signal to devices  
 
-                barrier.Sync(); // wait for devices to end  
+                barrier.Sync(); // Wait for devices to end  
 
                 algo_rng.Stop();
                 sw.stop();
@@ -343,9 +318,11 @@ namespace graphs {
                 // Gather
                 auto gathered_output = Algo::Gather(dev_graph_allocator, args...);
                 
+                // Output
                 if (FLAGS_output.length() != 0)
                     Algo::Output(FLAGS_output.c_str(), gathered_output);
 
+                // Check results
                 if (FLAGS_check) {
                     auto regression = Algo::Host(context.host_graph, args...);
                     return Algo::CheckErrors(gathered_output, regression) == 0;
@@ -358,6 +335,5 @@ namespace graphs {
         };
     }
 }
-}
 
-#endif // __GROUTE_GRAPHS_TRAVERSAL_ALGO_H
+#endif // __GRAPHS_TRAVERSAL_H

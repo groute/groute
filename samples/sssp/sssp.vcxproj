@@ -181,10 +181,17 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\common.h" />
     <ClInclude Include="..\..\include\groute\communication.h" />
     <ClInclude Include="..\..\include\groute\context.h" />
-    <ClInclude Include="..\..\include\groute\cta_work.h" />
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h" />
+    <ClInclude Include="..\..\include\groute\device\counter.cuh" />
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh" />
+    <ClInclude Include="..\..\include\groute\device\queue.cuh" />
+    <ClInclude Include="..\..\include\groute\device\signal.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
-    <ClInclude Include="..\..\include\groute\fused_worker.h" />
     <ClInclude Include="..\..\include\groute\graphs\common.h" />
     <ClInclude Include="..\..\include\groute\graphs\coo_graph.h" />
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h" />
@@ -199,7 +206,6 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\memory_pool.h" />
     <ClInclude Include="..\..\include\groute\policy.h" />
     <ClInclude Include="..\..\include\groute\router.h" />
-    <ClInclude Include="..\..\include\groute\worklist.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h" />
     <ClInclude Include="..\..\include\utils\interactor.h" />
     <ClInclude Include="..\..\include\utils\markers.h" />
@@ -217,7 +223,6 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="sssp_async.cu" />
-    <CudaCompile Include="sssp_async_opt.cu" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\metis\libmetis\libmetis.vcxproj">

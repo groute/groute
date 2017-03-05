@@ -34,12 +34,9 @@
 
 #include <gflags/gflags.h>
 
-#include <groute/event_pool.h>
-#include <groute/dwl/distributed_worklist.cuh>
-#include <groute/dwl/work_kernels.cuh>
 #include <groute/device/cta_scheduler.cuh>
-
 #include <groute/graphs/csr_graph.h>
+#include <groute/dwl/distributed_worklist.cuh>
 #include <groute/dwl/workers.cuh>
 
 #include <utils/graphs/traversal.h>
@@ -117,7 +114,7 @@ namespace bfs {
 
     // BFS work without CTA support
     template<>
-    struct BFSWork<false> 
+    struct BFSWork< false > 
     {
         template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
         __device__ static void work(
@@ -203,7 +200,7 @@ namespace bfs {
         static const char* Name()           { return "BFS"; }
 
         static void Init(
-            groute::graphs::traversal::Context<bfs::Algo>& context,
+            utils::traversal::Context<bfs::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
             groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
@@ -273,7 +270,7 @@ namespace bfs {
         groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> ;
 
     template<typename TWorker>
-    using RunnerType = groute::graphs::traversal::Runner <
+    using RunnerType = utils::traversal::Runner <
         Algo, TWorker, DWCallbacks, local_work_t, remote_work_t,
         groute::graphs::multi::NodeOutputGlobalDatum<level_t> > ;
 }

@@ -75,7 +75,7 @@ cuda_add_executable(bfs src/utils/parser.cpp src/utils/utils.cpp src/groute/grap
 target_link_libraries(bfs ${EXTRA_LIBS})
 
 cuda_add_executable(sssp src/utils/parser.cpp src/utils/utils.cpp src/groute/graphs/csr_graph.cpp
-                    samples/sssp/sssp_async.cu samples/sssp/sssp_async_opt.cu
+                    samples/sssp/sssp_async.cu
                     samples/sssp/sssp_host.cpp 
 					samples/sssp/main.cpp)
 target_link_libraries(sssp ${EXTRA_LIBS})

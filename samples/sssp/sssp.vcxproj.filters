@@ -13,12 +13,15 @@
     <Filter Include="groute\graphs">
       <UniqueIdentifier>{6d5f43e3-0828-49a0-9168-3611698d90c6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="groute\dwl">
+      <UniqueIdentifier>{be235f85-e01a-4f45-8344-3855aa366f93}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\device">
+      <UniqueIdentifier>{36dd226d-1201-474b-94f5-0abaa722566f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\groute\event_pool.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\common.h">
@@ -46,9 +49,6 @@
       <Filter>utils</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\memcpy.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="sssp_common.h" />
@@ -85,12 +85,6 @@
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
       <Filter>groute\internal</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\cta_work.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_worker.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\groute\communication.h">
       <Filter>groute</Filter>
     </ClInclude>
@@ -99,6 +93,36 @@
     </ClInclude>
     <ClInclude Include="..\..\include\groute\policy.h">
       <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\counter.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\queue.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\signal.cuh">
+      <Filter>groute\device</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -114,6 +138,5 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="sssp_async.cu" />
-    <CudaCompile Include="sssp_async_opt.cu" />
   </ItemGroup>
 </Project>
