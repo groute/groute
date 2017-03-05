@@ -40,8 +40,6 @@
 #include <groute/worklist/work_source.cu.h>
 #include <groute/worklist/work_target.cu.h>
 
-#define GTID (blockIdx.x * blockDim.x + threadIdx.x)
-
 namespace groute
 {
     // Three different kernel fusion working schemes: Never stop, Run N times, 
@@ -103,15 +101,15 @@ namespace groute
 
             if (is_immediate_work)
             {
-                int high_leader = __ffs(immediate_mask) - 1;
+                int leader = __ffs(immediate_mask) - 1;
                 int thread_offset = __popc(immediate_mask & ((1 << cub::LaneId()) - 1));
-                immediate_worklist.append_warp(work, high_leader, __popc(immediate_mask), thread_offset);
+                immediate_worklist.append_warp(work, leader, __popc(immediate_mask), thread_offset);
             }
             else
             {
-                int low_leader = __ffs(deferred_mask) - 1;
+                int leader = __ffs(deferred_mask) - 1;
                 int thread_offset = __popc(deferred_mask & ((1 << cub::LaneId()) - 1));
-                deferred_worklist.append_warp(work, low_leader, __popc(deferred_mask), thread_offset);
+                deferred_worklist.append_warp(work, leader, __popc(deferred_mask), thread_offset);
             }
         }
     }
@@ -119,7 +117,8 @@ namespace groute
     template <
         typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
         typename DWCallbacks, typename Work, typename... WorkArgs>
-        __global__ void FusedWorkKernel(dev::Worklist<TLocal>           immediate_worklist,
+    __global__ void FusedWorkKernel(
+                                  dev::Worklist<TLocal>           immediate_worklist,
                                   dev::Worklist<TLocal>           deferred_worklist,
                                   dev::CircularWorklist<TLocal>   remote_input,
                                   dev::CircularWorklist<TRemote>  remote_output,
@@ -141,7 +140,7 @@ namespace groute
         uint32_t prev_start;
 
         int prev_deferred_work, prev_immediate_work;
-        if (GTID == 0)
+        if (TID_1D == 0)
         {
             prev_deferred_work = deferred_worklist.len();
             prev_immediate_work = immediate_worklist.len();
@@ -149,7 +148,7 @@ namespace groute
 
         while (!cond.stop())
         {
-            if (GTID == 0)
+            if (TID_1D == 0)
             {
                 *grid_work_size = remote_input.size(); // we must decide on work size globally  
             }
@@ -161,7 +160,7 @@ namespace groute
 
             grid_barrier.Sync();
 
-            if (GTID == 0)
+            if (TID_1D == 0)
             {
                 new_immediate_work += (int)immediate_worklist.len();
                 performed_immediate_work += (int)work_size;
@@ -189,7 +188,7 @@ namespace groute
                 grid_barrier.Sync();
 
                 // Transmit work
-                if (GTID == 0)
+                if (TID_1D == 0)
                 {
                     uint32_t remote_work_count = remote_output.get_alloc_count_and_sync();
                     if (remote_work_count > 0) dev::Signal::Increase(remote_work_signal, remote_work_count);
@@ -197,7 +196,7 @@ namespace groute
             }
 
             // Count total performed work
-            if (GTID == 0)
+            if (TID_1D == 0)
             {
                 new_immediate_work += remote_input.get_start_diff(prev_start);
                 performed_immediate_work += immediate_worklist.len();
@@ -206,7 +205,7 @@ namespace groute
             }
         }
 
-        if (GTID == 0)
+        if (TID_1D == 0)
         {
             __threadfence();
             // Report work
@@ -219,7 +218,7 @@ namespace groute
     template <
             typename WorkSource, typename TLocal, typename TRemote, 
             typename DWCallbacks, typename Work, typename... WorkArgs>
-        __global__ void WorkKernel(WorkSource work_source, dev::Worklist<TLocal> output_worklist,
+    __global__ void WorkKernel(WorkSource work_source, dev::Worklist<TLocal> output_worklist,
                                   DWCallbacks       callbacks,
                                   WorkArgs...       args)
     {

@@ -320,6 +320,10 @@ namespace groute {
                 m_send_worklist.PopItemsAsync(pop.size, stream);
             }
         }
+
+        //
+        // Internal peer API, used by DistributedWorklist (friend class)
+        //
         
         void InitWorklists()
         {
@@ -357,6 +361,16 @@ namespace groute {
 
             m_receive_thread = std::thread([this]() { ReceiveLoop(); });
             m_pop_thread = std::thread([this]() { PopLoop(); });
+        }
+        
+        void AdvancePriorityThreshold(int priority_threshold)
+        {
+            std::lock_guard<std::mutex> guard(m_receive_mutex);
+            m_current_threshold = priority_threshold;
+
+            m_receive_work = true;
+            m_receive_work_event = Event();
+            m_receive_cv.notify_one();
         }
     public:
         DistributedWorklistPeer(
@@ -452,16 +466,6 @@ namespace groute {
 
             InvokeSplitSend(split_work, stream);
             SignalRemoteWork(m_context.RecordEvent(m_endpoint, stream));
-        }
-
-        void AdvancePriorityThreshold(int priority_threshold)
-        {
-            std::lock_guard<std::mutex> guard(m_receive_mutex);
-            m_current_threshold = priority_threshold;
-
-            m_receive_work = true;
-            m_receive_work_event = Event();
-            m_receive_cv.notify_one();
         }
     };
 

@@ -65,7 +65,7 @@ namespace bfs {
 
     __global__ void BFSInit(level_t* levels, int nnodes)
     {
-        int tid = GTID;
+        int tid = TID_1D;
         if (tid < nnodes)
         {
             levels[tid] = INF;
