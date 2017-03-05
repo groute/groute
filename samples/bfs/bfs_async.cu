@@ -219,7 +219,7 @@ namespace bfs {
             groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
 
             // Report the initial work
-            distributed_worklist.ReportWork(1, 0, Name(), host, true);
+            distributed_worklist.ReportInitialWork(1, host);
 
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
@@ -231,7 +231,6 @@ namespace bfs {
         template<typename TGraph, typename TGraphDatum>
         static void DeviceInit(groute::Stream& stream, TGraph graph, TGraphDatum levels_datum)
         {
-
             dim3 grid_dims, block_dims;
             KernelSizing(grid_dims, block_dims, levels_datum.size);
 

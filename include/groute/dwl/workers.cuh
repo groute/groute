@@ -196,13 +196,15 @@ namespace groute {
 
         void Work(
             IDistributedWorklist <TLocal, TRemote>& distributed_worklist,
-            IDistributedWorklistPeer <TLocal, TRemote>* peer, Stream& stream, const WorkArgs&... args)
+            IDistributedWorklistPeer <TLocal, TRemote, DWCallbacks>* peer, Stream& stream, const WorkArgs&... args)
         {
             Worklist<TLocal>* immediate_worklist = &peer->GetLocalWorkspace(0);
             Worklist<TLocal>* deferred_worklist = &peer->GetLocalWorkspace(1);
 
             CircularWorklist<TRemote>*  remote_output = &peer->GetRemoteOutputWorklist();
             CircularWorklist<TLocal>*  remote_input = &peer->GetLocalInputWorklist();
+
+            DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
             volatile int *immediate_work_counter, *deferred_work_counter;
 
@@ -229,7 +231,7 @@ namespace groute {
 
                 if (FLAGS_count_work)
                 {
-                    //Marker::MarkWorkitems(distributed_worklist.GetCurrentWorkCount(m_endpoint), KernelName());
+                    Marker::MarkWorkitems(distributed_worklist.GetCurrentWorkCount(m_endpoint), KernelName());
                 }
                 
                 groute::FusedWorkKernel <StoppingCondition, TLocal, TRemote, TPrio, DWCallbacks, TWork, WorkArgs... >
@@ -242,7 +244,7 @@ namespace groute {
                     immediate_work_counter, deferred_work_counter,
                     m_kernel_internal_counter, m_work_signal.GetDevPtr(),
                     m_barrier_lifetime,                       
-                    DWCallbacks(args...),
+                    callbacks,
                     args...
                     );
 
@@ -254,7 +256,7 @@ namespace groute {
                     if (signal == prev_signal) break; // Exit was signaled  
 
                     int work = signal - prev_signal;
-                    distributed_worklist.ReportWork(work, 0, WorkerName(), m_endpoint);
+                    distributed_worklist.ReportWork(work, 0, m_endpoint);
 
                     prev_signal = signal; // Update
                     peer->SignalRemoteWork(Event()); // Trigger work sending to router
@@ -263,8 +265,8 @@ namespace groute {
                 stream.EndSync(); // Sync on the kernel        
 
                 // Some work was done by the kernel, report it   
-                distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, WorkerName(), m_endpoint);
-                distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, WorkerName(), m_endpoint);
+                distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, m_endpoint);
+                distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, m_endpoint);
 
                 if (FLAGS_verbose)
                 {
@@ -322,10 +324,11 @@ namespace groute {
                 
         void Work(
             IDistributedWorklist <TLocal, TRemote>& distributed_worklist,
-            IDistributedWorklistPeer <TLocal, TRemote>* peer, Stream& stream, const WorkArgs&... args)
+            IDistributedWorklistPeer <TLocal, TRemote, DWCallbacks>* peer, Stream& stream, const WorkArgs&... args)
         {
                 auto& input_worklist = peer->GetLocalInputWorklist();
                 auto& workspace = peer->GetLocalWorkspace(0); 
+                DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
                 while (distributed_worklist.HasWork())
                 {
@@ -347,7 +350,7 @@ namespace groute {
 
                                 dev::WorkSourceArray<index_t>(subseg.GetSegmentPtr(), subseg.GetSegmentSize()),
                                 workspace.DeviceObject(),
-                                DWCallbacks(args...),
+                                callbacks,
                                 args...
                                 );
 
@@ -361,19 +364,8 @@ namespace groute {
 
                     workspace.ResetAsync(stream.cuda_stream); // reset the temp output worklist  
 
-#ifndef NDEBUG  
-                    if (FLAGS_debug_print)
-                    {
-                        std::unique_lock<std::mutex> guard(distributed_worklist.log_gate);
-                        printf("\n\n\tDevice: %d\n%s->Input: ", (groute::Endpoint::identity_type)m_endpoint, WorkerName());
-                        input_worklist.PrintOffsetsDebug(stream);
-                        printf("\n%s->Output: ", WorkerName());
-                        workspace.PrintOffsetsDebug(stream);
-                    }
-#endif
-
                     // report work
-                    distributed_worklist.ReportWork((int)new_work, (int)performed_work, WorkerName(), m_endpoint);
+                    distributed_worklist.ReportWork((int)new_work, (int)performed_work, m_endpoint);
                 }
             }
     };

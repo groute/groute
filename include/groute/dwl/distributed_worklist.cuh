@@ -61,9 +61,11 @@ namespace groute {
     {
         virtual ~IDistributedWorklist() { }
 
-        virtual void ReportWork(int new_work, int performed_work, const char* caller, Endpoint endpoint, bool initial = false) = 0;
-        virtual void ReportDeferredWork(int new_work, int performed_work, const char* caller, Endpoint endpoint) = 0;
+        virtual void ReportInitialWork(int initial_work, Endpoint endpoint, const char* caller = "") = 0;
+        virtual void ReportWork(int new_work, int performed_work, Endpoint endpoint, const char* caller = "") = 0;
+        virtual void ReportDeferredWork(int new_work, int performed_work, Endpoint endpoint, const char* caller = "") = 0;
 
+        virtual uint32_t GetCurrentWorkCount(Endpoint endpoint) = 0;
         virtual int GetPriorityThreshold() = 0;
         virtual bool HasWork() const = 0;
         
@@ -72,13 +74,16 @@ namespace groute {
         std::mutex log_gate;
     };
 
-    template<typename TLocal, typename TRemote>
+    template<typename TLocal, typename TRemote, typename DWCallbacks>
     struct IDistributedWorklistPeer
     {
         virtual ~IDistributedWorklistPeer() { }
 
         /// Get a local workspace 
         virtual Worklist<TLocal>& GetLocalWorkspace(int i) = 0;
+
+        // Get device callbacks (see split_kernels.cuh for contract) 
+        virtual const DWCallbacks& GetDeviceCallbacks() = 0;
 
         /// The LocalInputWorklist, acts as a device-level 'link' for local input   
         virtual CircularWorklist<TLocal>& GetLocalInputWorklist() = 0;
@@ -98,7 +103,7 @@ namespace groute {
     };
 
     template<typename TLocal, typename TRemote, typename DWCallbacks>
-    class DistributedWorklistPeer : public IDistributedWorklistPeer < TLocal, TRemote >
+    class DistributedWorklistPeer : public IDistributedWorklistPeer < TLocal, TRemote, DWCallbacks>
     {
         template<typename TL, typename TR, typename DWC, typename TW>
         friend class DistributedWorklist;
@@ -184,7 +189,8 @@ namespace groute {
             m_distributed_worklist.ReportWork(
                 0,
                 filtered_work, // All sent work is reported as high priority, so we report filtering as high-prio work done 
-                "SplitReceive", m_endpoint
+                m_endpoint, 
+                "SplitReceive" 
                 );
         }
 
@@ -394,6 +400,8 @@ namespace groute {
 
         Worklist<TLocal>& GetLocalWorkspace(int i) override { return m_local_workspaces[i]; }
 
+        const DWCallbacks& GetDeviceCallbacks() override { return m_device_callbacks; }
+
         CircularWorklist<TLocal>& GetLocalInputWorklist() override { return m_receive_worklist; }
 
         CircularWorklist<TRemote>& GetRemoteOutputWorklist() override { return m_send_worklist; }
@@ -562,7 +570,7 @@ namespace groute {
             return m_links[source];
         }
 
-        IDistributedWorklistPeer<TLocal, TRemote>* GetPeer(Endpoint endpoint)
+        IDistributedWorklistPeer<TLocal, TRemote, DWCallbacks>* GetPeer(Endpoint endpoint)
         {
             if (m_peers.find(endpoint) == m_peers.end()) throw std::exception("Endpoint not registered as a worker");
             return m_peers[endpoint].get();
@@ -580,12 +588,22 @@ namespace groute {
             GetWorker(endpoint)->Work(*this, GetPeer(endpoint), stream, args...); // TODO: pass callbacks as well
         }
 
-        uint32_t GetCurrentWorkCount(Endpoint endpoint)
+        uint32_t GetCurrentWorkCount(Endpoint endpoint) override
         {
             return m_endpoint_work[endpoint];
         }
 
-        void ReportWork(int new_work, int performed_work, const char* caller, Endpoint endpoint, bool initial = false) override
+        void ReportInitialWork(int initial_work, Endpoint endpoint, const char* caller = "") override
+        {
+            ReportWork(initial_work, 0, endpoint, caller, true);
+        }
+
+        void ReportWork(int new_work, int performed_work, Endpoint endpoint, const char* caller = "") override
+        {
+            ReportWork(new_work, performed_work, endpoint, caller, false);
+        }
+
+        void ReportWork(int new_work, int performed_work, Endpoint endpoint, const char* caller, bool initial)
         {
             int work = new_work - performed_work;
 
@@ -627,7 +645,7 @@ namespace groute {
             }
         }
 
-        void ReportDeferredWork(int new_work, int performed_work, const char* caller, Endpoint endpoint) override
+        void ReportDeferredWork(int new_work, int performed_work, Endpoint endpoint, const char* caller = "") override
         {
             int work = new_work - performed_work;
 

@@ -181,7 +181,7 @@ namespace groute
                 int cur_chunk = min(immediate_worklist.len() - chunk, chunk_size);
                 Work::work(
                     dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
-                    dev::WorkTargetSplit<TLocal, TRemote, DWCallbacks>(remote_input, remote_output, callbacks),
+                    dev::WorkTargetSplitSend<TLocal, TRemote, DWCallbacks>(remote_input, remote_output, callbacks),
                     args...
                     );
 

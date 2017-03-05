@@ -83,6 +83,8 @@ namespace groute
 
             if (flags & SF_Pass)
             {
+                assert(!(flags & SF_Take)); // We currently do not support Take + Pass (requires double work counting)
+
                 // pack data
                 TRemote packed = callbacks.pack(work);
                 remote_work.append_warp(packed); // notice the append  

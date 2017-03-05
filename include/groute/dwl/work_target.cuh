@@ -87,7 +87,7 @@ namespace groute {
         };
 
         template<typename TLocal, typename TRemote, typename DWCallbacks>
-        struct WorkTargetSplit
+        struct WorkTargetSplitSend
         {
         private:
             dev::CircularWorklist<TLocal>& m_remote_input;
@@ -95,7 +95,7 @@ namespace groute {
             DWCallbacks& m_callbacks;
 
         public:
-            __device__ __forceinline__  WorkTargetSplit(dev::CircularWorklist<TLocal>& remote_input, dev::CircularWorklist<TRemote>& remote_output, DWCallbacks& callbacks) :
+            __device__ __forceinline__  WorkTargetSplitSend(dev::CircularWorklist<TLocal>& remote_input, dev::CircularWorklist<TRemote>& remote_output, DWCallbacks& callbacks) :
                 m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
 
             __device__ __forceinline__ void append_work(const TLocal& unpacked)
@@ -108,6 +108,8 @@ namespace groute {
 
                 if (flags & SF_Pass)
                 {
+                    assert(!(flags & SF_Take)); // We currently do not support Take + Pass (requires double work counting)
+
                     // pack data
                     TRemote packed = m_callbacks.pack(unpacked);
                     m_remote_output.append_warp(packed); // appending  
@@ -126,13 +128,14 @@ namespace groute {
 
                 if (flags & SF_Pass)
                 {
+                    assert(!(flags & SF_Take)); // We currently do not support Take + Pass (requires double work counting)
                     m_remote_output.append_warp(packed); // appending  
                 }
             }
         };
 
         template<typename T, typename DWCallbacks>
-        struct WorkTargetSplit < T, T, DWCallbacks >
+        struct WorkTargetSplitSend < T, T, DWCallbacks >
         {
         private:
             dev::CircularWorklist<T>& m_remote_input;
@@ -140,7 +143,7 @@ namespace groute {
             DWCallbacks& m_callbacks;
 
         public:
-            __device__ __forceinline__  WorkTargetSplit(dev::CircularWorklist<T>& remote_input, dev::CircularWorklist<T>& remote_output, DWCallbacks& callbacks) :
+            __device__ __forceinline__  WorkTargetSplitSend(dev::CircularWorklist<T>& remote_input, dev::CircularWorklist<T>& remote_output, DWCallbacks& callbacks) :
                 m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
 
             __device__ __forceinline__ void append_work(const T& unpacked)
@@ -153,6 +156,8 @@ namespace groute {
 
                 if (flags & SF_Pass)
                 {
+                    assert(!(flags & SF_Take)); // We currently do not support Take + Pass (requires double work counting)
+
                     // pack data
                     T packed = m_callbacks.pack(unpacked);
                     m_remote_output.append_warp(packed); // appending  
