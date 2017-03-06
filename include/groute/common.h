@@ -72,6 +72,19 @@ namespace {
 
 namespace groute {
 
+    class exception : public std::exception 
+    {
+        const char* m_message;
+
+    public:
+        exception(const char* message) : m_message(message) { }
+        exception() : m_message(nullptr) { }
+        const char* what() const override 
+        {
+            return m_message == nullptr ? std::exception::what() : m_message; 
+        }
+    };
+
     typedef int device_t;
 
     /**
@@ -258,7 +271,7 @@ namespace groute {
 #ifndef NDEBUG
             if (relative_offset > m_segment_size ||
                 sub_segment_size > m_segment_size - relative_offset)
-                throw std::exception(); // out of segment range
+                throw groute::exception(); // out of segment range
 #endif
             return Segment<T>(
                 m_segment_ptr + relative_offset, m_total_size, sub_segment_size, m_segment_offset + relative_offset, metadata);
@@ -423,11 +436,11 @@ namespace std
 {
     template<>
 	struct hash<groute::Endpoint>
-		: private _Bitwise_hash<groute::Endpoint::identity_type>
+		: private hash<groute::Endpoint::identity_type>
 	{	// hash functor for Endpoint (to enable usage as key)
         size_t operator()(const groute::Endpoint& endpoint) const
         {
-            return _Bitwise_hash<groute::Endpoint::identity_type>::operator()(
+            return hash<groute::Endpoint::identity_type>::operator()(
                 static_cast<groute::Endpoint::identity_type>(endpoint));
         }
 	};

@@ -120,8 +120,8 @@ namespace groute {
             DEFERRED_COUNTER = 1,
             BLOCK_SIZE = 256 
         };
-        static char* WorkerName() { return "FusedWorker"; }
-        static char* KernelName() { return "FusedWorkKernel"; }
+        static const char* WorkerName() { return "FusedWorker"; }
+        static const char* KernelName() { return "FusedWorkKernel"; }
 
         Endpoint m_endpoint;
         
@@ -313,8 +313,8 @@ namespace groute {
     {
         Endpoint m_endpoint;
 
-        static char* WorkerName() { return "UnoptimizedWorker"; }
-        static char* KernelName() { return "WorkKernel"; }
+        static const char* WorkerName() { return "UnoptimizedWorker"; }
+        static const char* KernelName() { return "WorkKernel"; }
         
     public:
         static const int num_workspaces = 1;    

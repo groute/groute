@@ -289,7 +289,7 @@ namespace groute {
             if (m_promised_segments.empty())
             {
                 printf("\n\nWarning: No pipeline buffers available (usage: PipelinedReceive -> ReleaseReceiveBuffer)\n\n");
-                throw std::exception("No pipeline buffers"); 
+                throw groute::exception("No pipeline buffers"); 
             }
     
             auto pseg = m_promised_segments.front();
@@ -301,7 +301,7 @@ namespace groute {
         {
 #ifndef NDEBUG
             if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), buffer) == this->m_endpoint_buffers.end())
-                throw std::exception("Unrecognized buffer in pipelined receiver"); 
+                throw groute::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
             m_promised_segments.push_back(m_receiver->Receive(Buffer<T>(buffer, this->m_chunk_size), ready_event));
         }
@@ -352,7 +352,7 @@ namespace groute {
             if (m_promised_buffers.empty())
             {
                 printf("\n\nWarning: No pipeline buffers available (usage: GetSendBuffer -> PipelinedSend)\n\n");
-                throw std::exception("No pipeline buffers"); 
+                throw groute::exception("No pipeline buffers"); 
             }
 
             auto buff = m_promised_buffers.front();
@@ -367,7 +367,7 @@ namespace groute {
             T* ptr = segment.GetSegmentPtr();
 #ifndef NDEBUG
             if (std::find(this->m_endpoint_buffers.begin(), this->m_endpoint_buffers.end(), ptr) == this->m_endpoint_buffers.end())
-                throw std::exception("Unrecognized buffer in pipelined receiver"); 
+                throw groute::exception("Unrecognized buffer in pipelined receiver"); 
 #endif
             auto event_fut = m_sender->Send(segment, ready_event);
             m_promised_buffers.push_back(BufferFuture(event_fut, ptr));

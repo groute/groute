@@ -493,7 +493,7 @@ namespace groute {
             if(*m_host_count > m_capacity)
             {
                 printf(
-                    "\n\nCritical Warning: worklist has overflowed, please allocate more memory \n\t\[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
+                    "\n\nCritical Warning: worklist has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
                     (Endpoint::identity_type)0, "", -1, m_capacity, *m_host_count - m_capacity);
                 exit(1);
             }
@@ -672,7 +672,7 @@ namespace groute {
             if (end - start >= m_capacity)
             {
                 printf(
-                    "\n\nCritical Warning: circular worklist has overflowed, please allocate more memory \n\t\[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
+                    "\n\nCritical Warning: circular worklist has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
                     (Endpoint::identity_type)m_endpoint, m_name, m_instance_id, start, end, m_capacity, (end - start) - m_capacity);
                 exit(1);
             }

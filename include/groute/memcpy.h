@@ -117,7 +117,7 @@ namespace groute {
 
             else // host to host
             {
-                std::memcpy(dst_buffer, src_buffer, count);
+                memcpy(dst_buffer, src_buffer, count);
             }
         }
         

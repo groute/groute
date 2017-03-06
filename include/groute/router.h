@@ -438,7 +438,7 @@ namespace groute {
                 if (m_shutdown)
                 {
                     printf("\n\nWarning: Sender was Shutdown and is now used again for Send\n\n");
-                    throw std::exception("Sender was Shutdown"); 
+                    throw groute::exception("Sender was Shutdown"); 
                 }
     
                 if (segment.Empty()) return groute::completed_future(Event());
@@ -620,7 +620,7 @@ namespace groute {
             if (m_finalized) 
             {
                 printf("\n\nWarning: Router is finalized, cannot add more links at this point\n\n");
-                throw std::exception("Router already finalized"); 
+                throw groute::exception("Router already finalized"); 
             }
         }
 
@@ -629,7 +629,7 @@ namespace groute {
             if (!m_finalized) 
             {
                 printf("\n\nWarning: Router is not finalized yet, cannot send data through links\n\n");
-                throw std::exception("Router not finalized yet");
+                throw groute::exception("Router not finalized yet");
             }
         }
 
@@ -660,7 +660,7 @@ namespace groute {
                     if (m_receivers.find(dst) == m_receivers.end()) 
                     {
                         printf("\n\nWarning: Policy specified a destination endpoint which was not registered to the router through any link\n\n");
-                        throw std::exception("Destination not found");
+                        throw groute::exception("Destination not found");
                     }
 
                     m_context.RequireMemcpyLane(src, dst);

@@ -513,7 +513,7 @@ namespace groute {
             m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
             m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0)
         {
-            if (workers.size() != callbacks.size()) throw std::exception("DW parameter mismatch (workers <-> callbacks)");
+            if (workers.size() != callbacks.size()) throw groute::exception("DW parameter mismatch (workers <-> callbacks)");
 
             if (FLAGS_verbose)
             {
@@ -538,7 +538,7 @@ namespace groute {
                 m_endpoint_work[worker] = 0;
                 m_context.SetDevice(worker);
 
-                if (callbacks.find(worker) == callbacks.end()) throw std::exception("DW: missing DWCallbacks for worker");
+                if (callbacks.find(worker) == callbacks.end()) throw groute::exception("DW: missing DWCallbacks for worker");
 
                 m_peers[worker] = groute::make_unique< PeerType >(
                     m_context, m_router, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size, num_buffers, WorkerType::num_workspaces);
@@ -566,19 +566,19 @@ namespace groute {
 
         Link<TRemote>& GetLink(Endpoint source) override
         {
-            if (m_links.find(source) == m_links.end()) throw std::exception("Endpoint not registered as a source");
+            if (m_links.find(source) == m_links.end()) throw groute::exception("Endpoint not registered as a source");
             return m_links[source];
         }
 
         IDistributedWorklistPeer<TLocal, TRemote, DWCallbacks>* GetPeer(Endpoint endpoint)
         {
-            if (m_peers.find(endpoint) == m_peers.end()) throw std::exception("Endpoint not registered as a worker");
+            if (m_peers.find(endpoint) == m_peers.end()) throw groute::exception("Endpoint not registered as a worker");
             return m_peers[endpoint].get();
         }
 
         WorkerType* GetWorker(Endpoint endpoint)
         {
-            if (m_workers.find(endpoint) == m_workers.end()) throw std::exception("Endpoint not registered as a worker");
+            if (m_workers.find(endpoint) == m_workers.end()) throw groute::exception("Endpoint not registered as a worker");
             return m_workers[endpoint].get();
         }
 
