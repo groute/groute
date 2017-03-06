@@ -72,6 +72,9 @@ namespace {
 
 namespace groute {
 
+#ifdef WIN32
+    using exception = std::exception;
+#else
     class exception : public std::exception 
     {
         const char* m_message;
@@ -79,11 +82,12 @@ namespace groute {
     public:
         exception(const char* message) : m_message(message) { }
         exception() : m_message(nullptr) { }
-        const char* what() const override 
+        const char* what() const noexcept 
         {
             return m_message == nullptr ? std::exception::what() : m_message; 
         }
     };
+#endif
 
     typedef int device_t;
 

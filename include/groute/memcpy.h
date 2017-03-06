@@ -37,6 +37,7 @@
 #include <future>
 #include <functional>
 #include <cassert>
+#include <cstring>
 
 #include <cuda_runtime.h>
 

@@ -362,7 +362,7 @@ namespace groute {
                     new_work += output_seg.GetSegmentSize(); // Add the new work 
                     peer->SplitSend(output_seg, stream); // Call split-send
 
-                    workspace.ResetAsync(stream.cuda_stream); // Reset the locak workspace  
+                    workspace.ResetAsync(stream.cuda_stream); // Reset the local workspace  
 
                     // Report work
                     distributed_worklist.ReportWork((int)new_work, (int)performed_work, m_endpoint);

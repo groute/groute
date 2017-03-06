@@ -135,9 +135,6 @@ namespace groute
         // Keeping one SM free (use N-1 blocks where N is the number of SMs)
         StoppingCondition cond;
 
-        // The work target for Work::work
-        dev::WorkTargetSplitSend<TLocal, TRemote, DWCallbacks> work_target(remote_input, remote_output, callbacks);
-
         // Message transmission variables
         int new_immediate_work = 0, performed_immediate_work = 0;
         uint32_t prev_start;
@@ -182,7 +179,9 @@ namespace groute
 
                 // Perform work chunk
                 int cur_chunk = min(immediate_worklist.len() - chunk, chunk_size);
-
+                
+                // The work target for Work::work
+                dev::WorkTargetSplitSend<TLocal, TRemote, DWCallbacks> work_target(remote_input, remote_output, callbacks);
                 Work::work(
                     dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
                     work_target,
