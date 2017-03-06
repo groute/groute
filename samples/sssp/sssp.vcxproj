@@ -207,6 +207,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\policy.h" />
     <ClInclude Include="..\..\include\groute\router.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h" />
+    <ClInclude Include="..\..\include\utils\graphs\traversal.h" />
     <ClInclude Include="..\..\include\utils\interactor.h" />
     <ClInclude Include="..\..\include\utils\markers.h" />
     <ClInclude Include="..\..\include\utils\parser.h" />

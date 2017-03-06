@@ -26,6 +26,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include <vector>
 #include <algorithm>
 #include <thread>
@@ -60,7 +61,7 @@ namespace bfs {
     typedef index_t local_work_t;
     typedef LevelData remote_work_t;
 
-    __global__ void BFSInit(level_t* levels, int nnodes)
+    __global__ void BFSMemsetKernel(level_t* levels, int nnodes)
     {
         int tid = TID_1D;
         if (tid < nnodes)
@@ -70,7 +71,7 @@ namespace bfs {
     }
 
     template<bool CTAScheduling = true> 
-    // BFS work with Collective Thread Array scheduling for exploiting nested parallelism 
+    /// BFS work with Collective Thread Array scheduling for exploiting nested parallelism 
     struct BFSWork  
     {
         template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
@@ -112,8 +113,8 @@ namespace bfs {
         }
     };
 
-    // BFS work without CTA support
     template<>
+    /// BFS work without CTA support
     struct BFSWork< false > 
     {
         template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
@@ -199,18 +200,16 @@ namespace bfs {
         static const char* NameLower()      { return "bfs"; }
         static const char* Name()           { return "BFS"; }
 
-        static void Init(
+        static void HostInit(
             utils::traversal::Context<bfs::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
             groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
+            // Get a valid source_node from flag 
             index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
-            auto partitioner = graph_manager.GetGraphPartitioner();
-            if (partitioner->NeedsReverseLookup())
-            {
-                source_node = partitioner->GetReverseLookupFunc()(source_node);
-            }
+            // Map to the (possibly new) partitioned vertex space
+            source_node = graph_manager.GetGraphPartitioner()->ReverseLookup(source_node);
 
             // Host endpoint for sending initial work  
             groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
@@ -226,17 +225,26 @@ namespace bfs {
         }
 
         template<typename TGraph, typename TGraphDatum>
-        static void DeviceInit(groute::Stream& stream, TGraph graph, TGraphDatum levels_datum)
+        static void DeviceMemset(groute::Stream& stream, TGraph graph, TGraphDatum levels_datum)
         {
             dim3 grid_dims, block_dims;
             KernelSizing(grid_dims, block_dims, levels_datum.size);
 
-            BFSInit << < grid_dims, block_dims, 0, stream.cuda_stream >> >(
+            BFSMemsetKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
                 levels_datum.data_ptr, levels_datum.size);
         }
 
+        template<typename TGraph, typename TGraphDatum>
+        static void DeviceInit(
+            groute::Endpoint endpoint, groute::Stream& stream, 
+            groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist, 
+            groute::IDistributedWorklistPeer<local_work_t, remote_work_t, DWCallbacks>* peer, 
+            TGraph graph, TGraphDatum levels_datum)
+        {
+        }
+
         template<typename TGraphAllocator, typename TGraphDatum, typename...UnusedData>
-        static std::vector<level_t> Gather(TGraphAllocator& graph_allocator, TGraphDatum& levels_datum, UnusedData&... data)
+        static const std::vector<level_t>& Gather(TGraphAllocator& graph_allocator, TGraphDatum& levels_datum, UnusedData&... data)
         {
             graph_allocator.GatherDatum(levels_datum);
             return levels_datum.GetHostData();
@@ -259,27 +267,29 @@ namespace bfs {
         }
     };
 
+    using NodeLevelDatumType = groute::graphs::multi::NodeOutputGlobalDatum < level_t > ;
+
     template<bool IterationFusion = true, bool CTAScheduling = true>
     using FusedWorkerType = groute::FusedWorker <
         IterationFusion, local_work_t, remote_work_t, int, DWCallbacks, BFSWork<CTAScheduling>,
-        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> ;
+        groute::graphs::dev::CSRGraphSeg, NodeLevelDatumType::DeviceObjectType> ;
     
     template<bool CTAScheduling = true>
     using WorkerType = groute::Worker <
         local_work_t, remote_work_t, DWCallbacks, BFSWork<CTAScheduling>,
-        groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum < level_t >> ;
+        groute::graphs::dev::CSRGraphSeg, NodeLevelDatumType::DeviceObjectType> ;
 
     template<typename TWorker>
     using RunnerType = utils::traversal::Runner <
         Algo, TWorker, DWCallbacks, local_work_t, remote_work_t,
-        groute::graphs::multi::NodeOutputGlobalDatum<level_t> > ;
+        NodeLevelDatumType > ;
 }
 
 template<typename TWorker>
 bool TestBFSAsyncMultiTemplate(int ngpus)
 {
     bfs::RunnerType<TWorker> runner;
-    groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
+    bfs::NodeLevelDatumType levels_datum;
     return runner(ngpus, FLAGS_prio_delta, levels_datum);
 }
 

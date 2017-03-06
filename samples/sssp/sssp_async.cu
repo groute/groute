@@ -26,6 +26,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include <vector>
 #include <algorithm>
 #include <thread>
@@ -61,7 +62,7 @@ namespace sssp {
     typedef index_t local_work_t;
     typedef DistanceData remote_work_t;
 
-    __global__ void SSSPInit(distance_t* distances, int nnodes)
+    __global__ void SSSPMemsetKernel(distance_t* distances, int nnodes)
     {
         int tid = TID_1D;
         if (tid < nnodes)
@@ -71,7 +72,7 @@ namespace sssp {
     }
 
     template<bool CTAScheduling = true> 
-    // SSSP work with Collective Thread Array scheduling for exploiting nested parallelism 
+    /// SSSP work with Collective Thread Array scheduling for exploiting nested parallelism 
     struct SSSPWork
     {
         template<
@@ -117,8 +118,8 @@ namespace sssp {
         }
     };
 
-    // SSSP work without CTA support
     template<>
+    /// SSSP work without CTA support
     struct SSSPWork< false >
     {
         template<
@@ -212,18 +213,16 @@ namespace sssp {
         static const char* NameLower()      { return "sssp"; }
         static const char* Name()           { return "SSSP"; }
 
-        static void Init(
+        static void HostInit(
             utils::traversal::Context<sssp::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
             groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
+            // Get a valid source_node from flag 
             index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
-            auto partitioner = graph_manager.GetGraphPartitioner();
-            if (partitioner->NeedsReverseLookup())
-            {
-                source_node = partitioner->GetReverseLookupFunc()(source_node);
-            }
+            // Map to the (possibly new) partitioned vertex space
+            source_node = graph_manager.GetGraphPartitioner()->ReverseLookup(source_node);
 
             // Host endpoint for sending initial work  
             groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
@@ -239,19 +238,28 @@ namespace sssp {
         }
 
         template<typename TGraph, typename TWeightDatum, typename TDistanceDatum, typename...UnusedData>
-        static void DeviceInit(groute::Stream& stream, TGraph& graph, TWeightDatum& weights_datum, TDistanceDatum& distances_datum, const UnusedData&... data)
+        static void DeviceMemset(groute::Stream& stream, TGraph& graph, TWeightDatum& weights_datum, TDistanceDatum& distances_datum, const UnusedData&... data)
         {
             dim3 grid_dims, block_dims;
             KernelSizing(grid_dims, block_dims, distances_datum.size);
 
-            SSSPInit <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
+            SSSPMemsetKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
                 distances_datum.data_ptr, distances_datum.size);
+        }
+
+        template<typename TGraph, typename TWeightDatum, typename TDistanceDatum, typename...UnusedData>
+        static void DeviceInit(
+            groute::Endpoint endpoint, groute::Stream& stream, 
+            groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist, 
+            groute::IDistributedWorklistPeer<local_work_t, remote_work_t, DWCallbacks>* peer, 
+            TGraph& graph, TWeightDatum& weights_datum, TDistanceDatum& distances_datum, const UnusedData&... data)
+        {
         }
 
         template<
             typename TGraphAllocator,
             typename TWeightDatum, typename TDistanceDatum, typename...UnusedData>
-        static std::vector<distance_t> Gather(TGraphAllocator& graph_allocator, TWeightDatum& weights_datum, TDistanceDatum& distances_datum, UnusedData&... data)
+        static const std::vector<distance_t>& Gather(TGraphAllocator& graph_allocator, TWeightDatum& weights_datum, TDistanceDatum& distances_datum, UnusedData&... data)
         {
             graph_allocator.GatherDatum(distances_datum);
             return distances_datum.GetHostData();

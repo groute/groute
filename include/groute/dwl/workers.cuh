@@ -359,12 +359,12 @@ namespace groute {
                     }
 
                     auto output_seg = workspace.ToSeg(stream);
-                    new_work += output_seg.GetSegmentSize(); // add the new work 
-                    peer->SplitSend(output_seg, stream); // call split-send
+                    new_work += output_seg.GetSegmentSize(); // Add the new work 
+                    peer->SplitSend(output_seg, stream); // Call split-send
 
-                    workspace.ResetAsync(stream.cuda_stream); // reset the temp output worklist  
+                    workspace.ResetAsync(stream.cuda_stream); // Reset the locak workspace  
 
-                    // report work
+                    // Report work
                     distributed_worklist.ReportWork((int)new_work, (int)performed_work, m_endpoint);
                 }
             }

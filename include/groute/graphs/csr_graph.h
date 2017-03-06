@@ -555,9 +555,11 @@ namespace graphs {
                 int seg_idx,
                 index_t& seg_snode, index_t& seg_nnodes,
                 index_t& seg_sedge, index_t& seg_nedges) const = 0;
-
+            
             virtual bool NeedsReverseLookup() = 0;
-            virtual std::function<index_t(index_t)> GetReverseLookupFunc() = 0;
+
+            /// Maps a node from the original index space to the new partitioned index space   
+            virtual index_t ReverseLookup(index_t node) = 0;
         };
 
         class RandomPartitioner : public GraphPartitioner
@@ -596,13 +598,10 @@ namespace graphs {
                 seg_eedge = m_origin_graph.row_start[seg_enode];                            // end edge
                 seg_nedges = seg_eedge - seg_sedge;  
             }
-            
-            bool NeedsReverseLookup() override { return false; }
 
-            std::function<index_t(index_t)> GetReverseLookupFunc() override
-            {
-                return [](index_t idx) { return idx; }; // Just the identity func
-            }
+            bool NeedsReverseLookup() override { return false; }
+            
+            index_t ReverseLookup(index_t node) override { return node; }
         };
 
         class MetisPartitioner : public GraphPartitioner
@@ -625,7 +624,8 @@ namespace graphs {
                 index_t& seg_sedge, index_t& seg_nedges) const override;
             
             bool NeedsReverseLookup() override { return true; }
-            std::function<index_t(index_t)> GetReverseLookupFunc() override;
+
+            index_t ReverseLookup(index_t node) override;
         };
 
         /*
@@ -717,7 +717,7 @@ namespace graphs {
                 }
 
                 if (m_partitioner->NeedsReverseLookup())
-                    graph_datum.FinishGather(m_partitioner->GetReverseLookupFunc());
+                    graph_datum.FinishGather([this](index_t n) { return m_partitioner->ReverseLookup(n); });
             }
 
         private:

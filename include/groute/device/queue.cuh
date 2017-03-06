@@ -471,6 +471,11 @@ namespace groute {
             }
         }
 
+        void ResetAsync(Stream& stream)
+        {
+            ResetAsync(stream.cuda_stream);
+        }
+
         void AppendItemAsync(cudaStream_t stream, const T& item) const
         {
             WorklistAppendItem <<<1, 1, 0, stream >>>(DeviceObject(), item);

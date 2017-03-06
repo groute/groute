@@ -180,9 +180,9 @@ namespace graphs {
             seg_nedges = seg_eedge - seg_sedge;  
         }
         
-        std::function<index_t(index_t)> MetisPartitioner::GetReverseLookupFunc()
+        index_t MetisPartitioner::ReverseLookup(index_t node)
         {
-            return [this](index_t idx) { return this->m_reverse_lookup[idx]; };
+            return this->m_reverse_lookup[node];
         }
 
         std::vector<index_t> GetUniqueHalos(

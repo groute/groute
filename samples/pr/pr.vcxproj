@@ -181,15 +181,20 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\common.h" />
     <ClInclude Include="..\..\include\groute\communication.h" />
     <ClInclude Include="..\..\include\groute\context.h" />
-    <ClInclude Include="..\..\include\groute\cta_work.h" />
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h" />
+    <ClInclude Include="..\..\include\groute\device\counter.cuh" />
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh" />
+    <ClInclude Include="..\..\include\groute\device\queue.cuh" />
+    <ClInclude Include="..\..\include\groute\device\signal.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh" />
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh" />
     <ClInclude Include="..\..\include\groute\event_pool.h" />
-    <ClInclude Include="..\..\include\groute\fused_worker.h" />
     <ClInclude Include="..\..\include\groute\graphs\common.h" />
     <ClInclude Include="..\..\include\groute\graphs\coo_graph.h" />
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h" />
-    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h" />
-    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h" />
     <ClInclude Include="..\..\include\groute\groute.h" />
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h" />
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h" />
@@ -199,8 +204,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClInclude Include="..\..\include\groute\memory_pool.h" />
     <ClInclude Include="..\..\include\groute\policy.h" />
     <ClInclude Include="..\..\include\groute\router.h" />
-    <ClInclude Include="..\..\include\groute\worklist.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h" />
+    <ClInclude Include="..\..\include\utils\graphs\traversal.h" />
     <ClInclude Include="..\..\include\utils\interactor.h" />
     <ClInclude Include="..\..\include\utils\markers.h" />
     <ClInclude Include="..\..\include\utils\parser.h" />
@@ -216,7 +221,12 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClCompile Include="pr_host.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="pr_async.cu" />
+    <CudaCompile Include="pr_async.cu">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </CudaCompile>
     <CudaCompile Include="pr_async_opt.cu" />
   </ItemGroup>
   <ItemGroup>

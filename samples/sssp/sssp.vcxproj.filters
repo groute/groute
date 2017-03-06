@@ -19,6 +19,9 @@
     <Filter Include="groute\device">
       <UniqueIdentifier>{36dd226d-1201-474b-94f5-0abaa722566f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="utils\graphs">
+      <UniqueIdentifier>{f79a3e56-ca12-42a8-99ff-40030ab5067a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\groute\event_pool.h">
@@ -123,6 +126,9 @@
     </ClInclude>
     <ClInclude Include="..\..\include\groute\device\signal.cuh">
       <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\graphs\traversal.h">
+      <Filter>utils\graphs</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

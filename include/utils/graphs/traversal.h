@@ -226,9 +226,7 @@ namespace utils {
                 }
 
                 if (FLAGS_verbose) {
-                    printf("\n\nContext status (before):");
-                    context.PrintStatus();
-                    printf("\n\n");
+                    printf("\n\nContext status (before):"); context.PrintStatus(); printf("\n\n");
                 }
 
                 groute::graphs::multi::CSRGraphAllocator
@@ -236,12 +234,11 @@ namespace utils {
 
                 dev_graph_allocator.AllocateDatumObjects(args...);
 
+                // Setup pipeline paramenters for the DWL router
                 size_t num_exch_buffs = (FLAGS_pipe_size <= 0)
-                    ? ngpus*FLAGS_pipe_size_factor
-                    : FLAGS_pipe_size;
+                    ? ngpus*FLAGS_pipe_size_factor : FLAGS_pipe_size;
                 size_t max_exch_size = (FLAGS_pipe_alloc_size <= 0)
-                    ? max((size_t)(context.host_graph.nnodes * FLAGS_pipe_alloc_factor), (size_t)1)
-                    : FLAGS_pipe_alloc_size;
+                    ? max((size_t)(context.host_graph.nnodes * FLAGS_pipe_alloc_factor), (size_t)1) : FLAGS_pipe_alloc_size;
 
                 // Prepare DistributedWorklist parameters
                 groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
@@ -266,14 +263,21 @@ namespace utils {
                     {
                         context.SetDevice(i);
                         groute::Stream stream = context.CreateStream(i);
-
-                        Algo::DeviceInit(stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
+                        
+                        // Perform algorithm specific device memsets nedded before Algo::HostInit (excluded from timing) 
+                        Algo::DeviceMemset(stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
                         stream.Sync();
 
                         barrier.Sync(); // Signal to host
                         barrier.Sync(); // Receive signal from host
+                        
+                        // Perform algorithm specific initialization (included in timing) 
+                        Algo::DeviceInit(
+                            i, stream, distributed_worklist, distributed_worklist.GetPeer(i), 
+                            dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
+                        // Loop over the work until convergence  
                         distributed_worklist.Work(i, stream, dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
 
                         barrier.Sync(); // Signal completion to host
@@ -284,18 +288,17 @@ namespace utils {
 
                 barrier.Sync(); // Wait for devices to init 
 
-                Algo::Init(context, dev_graph_allocator, distributed_worklist); // init from host
-                distributed_worklist.GetLink(host).Shutdown();
+                Algo::HostInit(context, dev_graph_allocator, distributed_worklist); // Init from host
 
                 Stopwatch sw(true); // All threads are running, start timing
                 
-                IntervalRangeMarker algo_rng(context.nedges, "begin");
+                IntervalRangeMarker range_marker(context.nedges, "begin");
 
                 barrier.Sync(); // Signal to devices  
 
                 barrier.Sync(); // Wait for devices to end  
 
-                algo_rng.Stop();
+                range_marker.Stop();
                 sw.stop();
 
                 if (FLAGS_repetitions > 1)
@@ -310,9 +313,7 @@ namespace utils {
                 }
 
                 if (FLAGS_verbose) {
-                    printf("\n\nContext status (after):");
-                    context.PrintStatus();
-                    printf("\n\n");
+                    printf("\n\nContext status (after):"); context.PrintStatus(); printf("\n\n");
                 }
 
                 // Gather

@@ -26,12 +26,12 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include "pr_common.h"
 #include <utils/stopwatch.h>
 #include <float.h>
 #include <unordered_set>
 
-DEFINE_int32(max_pr_iterations, 200, "The maximum number of PR iterations"); // used just for host and some single versions  
 DEFINE_int32(top_ranks, 10, "The number of top ranks to compare for PR regression");
 DEFINE_bool(print_ranks, false, "Write out ranks to output");
 
@@ -105,7 +105,7 @@ std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)
             }
         }
 
-        if (++iteration > FLAGS_max_pr_iterations) break;
+        ++iteration;
         std::swap(in_wl, out_wl);
     }
 
@@ -113,8 +113,8 @@ std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)
 
     if (FLAGS_verbose)
     {
-        printf("\nPR Host: %f ms. <filter>\n\n", sw.ms());
-        printf("PR Host terminated after %d iterations (max: %d)\n\n", iteration, FLAGS_max_pr_iterations);
+        printf("\nPR Host: %f ms. \n", sw.ms());
+        printf("PR Host converged after %d iterations \n\n", iteration);
     }
 
     return ranks;
@@ -187,8 +187,6 @@ int PageRankCheckErrors(std::vector<rank_t>& ranks, std::vector<rank_t>& regress
         }
         printf("\nSummary: %d/%d large differences, %d/%d missing nodes, total mean diff: %f\n\n", num_diffs, (int)top, missing_nodes, (int)top, mean_diff);
     }
-
-    // TODO 
 
     return res ? 0 : num_diffs + missing_nodes;
 }
