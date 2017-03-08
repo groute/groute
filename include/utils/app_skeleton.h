@@ -76,6 +76,7 @@ DEFINE_bool(opt, true, "Run the optimized (prio + fusion) async multigpu variant
 DEFINE_string(graphfile, "", "A file with a graph in Dimacs 10 format");
 DEFINE_bool(ggr, true, "Graph file is a Galois binary GR file");
 DEFINE_bool(verbose, VERBOSE, "Verbose prints");
+DEFINE_bool(trace, false, "Trace prints (effects performance)");
 DEFINE_int32(repetitions, REPETITIONS_DEFAULT, "Repetitions of GPU tests");
 DEFINE_bool(gen_graph, false, "Generate a random graph");
 DEFINE_int32(gen_nnodes, 100000, "Number of nodes for random graph generation");

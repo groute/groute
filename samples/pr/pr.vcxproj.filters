@@ -137,7 +137,7 @@
     <ClCompile Include="..\..\src\groute\graphs\csr_graph.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="pr_async_unopt.cu" />
     <CudaCompile Include="pr_async.cu" />
-    <CudaCompile Include="pr_async_opt.cu" />
   </ItemGroup>
 </Project>

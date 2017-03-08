@@ -81,7 +81,7 @@ cuda_add_executable(sssp src/utils/parser.cpp src/utils/utils.cpp src/groute/gra
 target_link_libraries(sssp ${EXTRA_LIBS})
 
 cuda_add_executable(pr src/utils/parser.cpp src/utils/utils.cpp src/groute/graphs/csr_graph.cpp
-					samples/pr/pr_async.cu samples/pr/pr_async_opt.cu samples/pr/pr_host.cpp 
+					samples/pr/pr_async.cu samples/pr/pr_host.cpp 
 					samples/pr/main.cpp)
 target_link_libraries(pr ${EXTRA_LIBS})
 

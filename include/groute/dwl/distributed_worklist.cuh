@@ -47,6 +47,7 @@
 #include <groute/dwl/split_kernels.cuh>
 
 DECLARE_bool(verbose);
+DECLARE_bool(trace);
 DECLARE_bool(count_work);
 
 DECLARE_double(wl_alloc_factor_local);
@@ -173,7 +174,7 @@ namespace groute {
 
             int filtered_work = (int)m_filter_counter.GetCount(stream);
 
-            if (FLAGS_verbose)
+            if (FLAGS_trace)
             {
                 int take_counter = m_receive_worklist.GetAllocCountAndSync(stream);
                 int pass_counter = m_pass_worklist.GetAllocCountAndSync(stream);
@@ -585,7 +586,7 @@ namespace groute {
         template<typename... WorkArgs>
         void Work(Endpoint endpoint, Stream& stream, const WorkArgs&... args)
         {
-            GetWorker(endpoint)->Work(*this, GetPeer(endpoint), stream, args...); // TODO: pass callbacks as well
+            GetWorker(endpoint)->Work(*this, GetPeer(endpoint), stream, args...); 
         }
 
         uint32_t GetCurrentWorkCount(Endpoint endpoint) override

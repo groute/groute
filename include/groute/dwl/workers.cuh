@@ -43,6 +43,7 @@
 #include <gflags/gflags.h>
 #include <utils/markers.h>
 
+DECLARE_bool(trace);
 DEFINE_int32(fused_chunk_size, INT_MAX, "Intermediate peer transfer");
 
 namespace groute {
@@ -164,7 +165,7 @@ namespace groute {
             size_t fused_work_blocks 
                 = (props.multiProcessorCount - 1) * occupancy_per_MP; // -1 for split-receive  
 
-            if (FLAGS_verbose)
+            if (FLAGS_trace)
             {
                 printf(
                     "%d - fused kernel, multi processor count: %d, occupancy: %d, blocks: %llu [(mp-1)*occupancy]\n", 
@@ -217,7 +218,7 @@ namespace groute {
             {
                 int priority_threshold = distributed_worklist.GetPriorityThreshold();
 
-                if (FLAGS_verbose)
+                if (FLAGS_trace)
                 {
                     int immediate_in = immediate_worklist->GetLength(stream);
                     int deferred_in = deferred_worklist->GetLength(stream);
@@ -268,7 +269,7 @@ namespace groute {
                 distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, m_endpoint);
                 distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, m_endpoint);
 
-                if (FLAGS_verbose)
+                if (FLAGS_trace)
                 {
                     printf(
                         "%d - done kernel, LWC: %d, HWC: %d\n", 
@@ -282,7 +283,7 @@ namespace groute {
 
                 auto segs = peer->WaitForLocalWork(stream, priority_threshold);
 
-                if (FLAGS_verbose)
+                if (FLAGS_trace)
                 {
                     int segs_size = 0;
                     for (auto& seg : segs)
