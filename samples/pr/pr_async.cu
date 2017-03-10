@@ -59,25 +59,12 @@ namespace pr {
     typedef index_t local_work_t;
     typedef RankData remote_work_t;
 
-    template<typename TGraph, typename ResidualDatum>
-    __global__ void PageRankInitKernel(TGraph graph, ResidualDatum residual)
-    {
-        unsigned tid = TID_1D;
-        unsigned nthreads = TOTAL_THREADS_1D;
-
-        index_t start_node = graph.owned_start_node();
-        index_t end_node = start_node + graph.owned_nnodes();
-
-        for (index_t node = start_node + tid; node < end_node; node += nthreads)
-        {
-            residual[node] = 1.0 - ALPHA;
-        }
-    }
-
     /*
     ---- PageRank Algorithm (data-driven, push-based) ----
 
     Based on Algorithm 4. in http://www.cs.utexas.edu/~inderjit/public_papers/scalable_pagerank_europar15.pdf
+    See pr_host.cpp for a simple host implementation  
+
     Terminology: T[v]: All outgoing neighbors of node v
                  S[v]: All incoming neighbors of node v
 
@@ -108,43 +95,57 @@ namespace pr {
     x = x / ||x||_1
     */
 
-    //template<
-    //    typename TGraph, typename RankDatum, typename ResidualDatum,  typename WorkTarget>
-    //__global__ void PageRankInitKernel(
-    //    TGraph graph, RankDatum current_ranks, ResidualDatum residual, WorkTarget remote_work_target)
-    //{
-    //    unsigned tid = TID_1D;
-    //    unsigned nthreads = TOTAL_THREADS_1D;
+    struct PageRankInit
+    {
+        template<
+            typename WorkSource, typename WorkTarget, 
+            typename TGraph, typename ResidualDatum, typename RankDatum>
+        __device__ static void work(
+            const WorkSource& work_source, WorkTarget& work_target,
+            const TGraph& graph, ResidualDatum& residual, RankDatum& current_ranks
+            )
+        {
+            uint32_t tid = TID_1D;
+            uint32_t nthreads = TOTAL_THREADS_1D;
 
-    //    index_t start_node = graph.owned_start_node();
-    //    index_t end_node = start_node + graph.owned_nnodes();
+            uint32_t work_size = work_source.get_size();
+            uint32_t work_size_rup = round_up(work_size, blockDim.x) * blockDim.x; // We need all threads in active blocks to enter the loop
 
-    //    for (index_t node = start_node + tid; node < end_node; node += nthreads)
-    //    {
-    //        current_ranks[node] = 1.0 - ALPHA;
+            for (uint32_t i = 0 + tid; i < work_size_rup; i += nthreads)
+            {
+                groute::dev::np_local<rank_t> np_local = { 0, 0, 0.0 };
 
-    //        index_t
-    //            begin_edge = graph.begin_edge(node),
-    //            end_edge = graph.end_edge(node),
-    //            out_degree = end_edge - begin_edge;
+                if (i < work_size)
+                {
+                    index_t node = work_source.get_work(i);
+                    current_ranks[node] = 1.0 - ALPHA;  // Initial rank
 
-    //        if (out_degree == 0) continue;
+                    np_local.start = graph.begin_edge(node);
+                    np_local.size = graph.end_edge(node) - np_local.start;
 
-    //        rank_t update = ((1.0 - ALPHA) * ALPHA) / out_degree;
+                    if (np_local.size > 0) // Skip zero-degree nodes 
+                    {
+                        rank_t update = ((1.0 - ALPHA) * ALPHA) / np_local.size; // Initial update
+                        np_local.meta_data = update;
+                    }
+                }
 
-    //        for (index_t edge = begin_edge; edge < end_edge; ++edge)
-    //        {
-    //            index_t dest = graph.edge_dest(edge);
-    //            if( atomicAdd(residual.get_item_ptr(dest), update) == 0 )
-    //            {
-    //                if (!graph.owns(dest)) // Push only remote nodes into the worklist since we process all 
-    //                {
-    //                    remote_work_target.append_work(dest);
-    //                }
-    //            }
-    //        }
-    //    }
-    //}
+                groute::dev::CTAWorkScheduler<rank_t>::template schedule(
+                    np_local,
+                    [&work_target, &graph, &residual](index_t edge, rank_t update)
+                    {
+                        index_t dest = graph.edge_dest(edge);
+                        rank_t prev = atomicAdd(residual.get_item_ptr(dest), update);
+                        
+                        if (!graph.owns(dest) && prev == 0) // Push only remote nodes since we process all owned nodes at init step 2 anyhow 
+                        {
+                            work_target.append_work(dest);
+                        }
+                    }
+                );
+            }
+        }
+    };
 
     template<bool CTAScheduling = true> 
     /// PR work with Collective Thread Array scheduling for exploiting nested parallelism 
@@ -262,98 +263,6 @@ namespace pr {
         }
     };
 
-    /*
-    template<
-        typename TGraph,
-        typename RankDatum,
-        typename ResidualDatum>
-        __global__ void PageRankFusedInit(TGraph graph,
-        RankDatum current_ranks, ResidualDatum residual,
-        groute::dev::CircularWorklist<local_work_t> rwl_in,   // prepending work here
-        groute::dev::CircularWorklist<remote_work_t> rwl_out,  // appending work here
-        volatile int*     host_high_work_counter,
-        volatile int*     host_low_work_counter,
-        volatile int *    send_signal_ptr,
-        cub::GridBarrier gbar)
-    {
-        unsigned tid = TID_1D;
-        unsigned nthreads = TOTAL_THREADS_1D;
-
-        index_t start_node = graph.owned_start_node();
-        index_t end_node = start_node + graph.owned_nnodes();
-
-        // Do init step 1
-        //
-        for (index_t node = start_node + tid; node < end_node; node += nthreads)
-        {
-            current_ranks[node] = 1.0 - ALPHA;
-
-            index_t
-                begin_edge = graph.begin_edge(node),
-                end_edge = graph.end_edge(node),
-                out_degree = end_edge - begin_edge;
-
-            if (out_degree == 0) continue;
-
-            rank_t update = ((1.0 - ALPHA) * ALPHA) / out_degree;
-
-            for (index_t edge = begin_edge; edge < end_edge; ++edge)
-            {
-                index_t dest = graph.edge_dest(edge);
-
-                if (graph.owns(dest))
-                {
-                    atomicAdd(residual.get_item_ptr(dest), update);
-                }
-                else // we only append remote nodes, since all owned nodes are processed at step 2
-                {
-                    // Write directly to remote out without atomics
-                    rwl_out.append_warp(RankData(dest, update));
-                }
-            }
-        }
-
-        gbar.Sync();
-
-        int prev_start;
-
-        // Transmit work
-        if (GTID == 0)
-        {
-            uint32_t remote_work_count = rwl_out.get_alloc_count_and_sync();
-            if (remote_work_count > 0) groute::dev::Signal::Increase(send_signal_ptr, remote_work_count);
-
-            prev_start = rwl_in.get_start();
-        }
-
-        gbar.Sync();
-
-        // Do init step 2
-        //
-        PageRankWork<TGraph, RankDatum, ResidualDatum>::work(
-            groute::dev::WorkSourceRange<index_t>(
-            graph.owned_start_node(),
-            graph.owned_nnodes()),
-            rwl_in, rwl_out,
-            graph, current_ranks, residual
-            );
-
-        gbar.Sync();
-
-        // Transmit and report work
-        if (GTID == 0)
-        {
-            uint32_t remote_work_count = rwl_out.get_alloc_count_and_sync();
-            if (remote_work_count > 0) groute::dev::Signal::Increase(send_signal_ptr, remote_work_count);
-
-            __threadfence();
-            // Report work
-            *host_high_work_counter = rwl_in.get_start_diff(prev_start) - graph.owned_nnodes();
-            *host_low_work_counter = 0;
-        }
-    }
-    */
-
     struct DWCallbacks
     {
     private:
@@ -399,7 +308,7 @@ namespace pr {
 
         __device__ __forceinline__ bool should_defer(const local_work_t& work, const rank_t& global_threshold)
         {
-            return false; // TODO: How can soft-priority be helpfull for PR?
+            return false; // TODO (research): How can soft-priority be helpfull for PR?
         }
 
         __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)
@@ -454,11 +363,26 @@ namespace pr {
             DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
             dim3 grid_dims, block_dims;
-
-            // Init residual values
+            
+            // Init step 1 (PageRankInit)
             KernelSizing(grid_dims, block_dims, graph.owned_nnodes());
-            PageRankInitKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(graph, residual);
+            groute::WorkKernel <groute::dev::WorkSourceRange<index_t>, local_work_t, remote_work_t, DWCallbacks, PageRankInit, TGraph, ResidualDatum, RankDatum>
 
+                <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
+
+                    groute::dev::WorkSourceRange<index_t>(graph.owned_start_node(), graph.owned_nnodes()),
+                    workspace.DeviceObject(),
+                    callbacks,
+                    graph, residual, ranks
+                    );
+
+            auto output_seg = workspace.ToSeg(stream);
+            distributed_worklist.ReportWork(output_seg.GetSegmentSize(), 0, endpoint);
+
+            peer->SplitSend(output_seg, stream); 
+            workspace.ResetAsync(stream); 
+
+            // Init step 2 (PageRankWork starting from all owned nodes)
             KernelSizing(grid_dims, block_dims, graph.owned_nnodes());
             groute::WorkKernel <groute::dev::WorkSourceRange<index_t>, local_work_t, remote_work_t, DWCallbacks, PageRankWork<>, TGraph, ResidualDatum, RankDatum>
 
@@ -470,43 +394,11 @@ namespace pr {
                     graph, residual, ranks
                     );
 
-            auto output_seg = workspace.ToSeg(stream);
-            int work = output_seg.GetSegmentSize(); 
+            output_seg = workspace.ToSeg(stream);
+            distributed_worklist.ReportWork(output_seg.GetSegmentSize(), graph.owned_nnodes(), endpoint);
+
             peer->SplitSend(output_seg, stream); 
-
             workspace.ResetAsync(stream); 
-            distributed_worklist.ReportWork(work, graph.owned_nnodes(), endpoint);
-
-            ///
-
-            //auto& input_worklist = peer->GetLocalInputWorklist();
-            //auto& temp_worklist = peer->GetLocalWorkspace(0); // local output worklist
-            //
-            //m_problem.Init__Multi__(temp_worklist, stream);
-            //
-            //auto seg1 = temp_worklist.ToSeg(stream);
-
-            //// report work
-            //distributed_worklist.ReportWork((int)seg1.GetSegmentSize(), (int)m_problem.m_graph.owned_nnodes(), endpoint );
-
-            //peer->SplitSend(seg1, stream); // call split-send
-            //
-            //temp_worklist.ResetAsync(stream.cuda_stream); // reset the temp output worklist
-
-            //// First relax is a special case, starts from all owned nodes
-            //m_problem.Relax__Multi__(
-            //    groute::dev::WorkSourceRange<index_t>(
-            //        m_problem.m_graph.owned_start_node(),
-            //        m_problem.m_graph.owned_nnodes()),
-            //        temp_worklist, stream);
-
-            //auto seg2 = temp_worklist.ToSeg(stream);
-            //
-            //// report work
-            //distributed_worklist.ReportWork((int)seg2.GetSegmentSize(), 0, endpoint);
-
-            //peer->SplitSend(seg2, stream); // call split-send
-            //temp_worklist.ResetAsync(stream.cuda_stream); // reset the temp output worklist
         }
 
         template<

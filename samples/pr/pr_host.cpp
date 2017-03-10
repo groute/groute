@@ -34,6 +34,7 @@
 
 DEFINE_int32(top_ranks, 10, "The number of top ranks to compare for PR regression");
 DEFINE_bool(print_ranks, false, "Write out ranks to output");
+DEFINE_bool(norm, false, "Normalize PR output ranks (L1)");
 
 
 std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)
@@ -52,7 +53,7 @@ std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)
 
         if (out_degree == 0) continue;
 
-        rank_t update = 1.0 / out_degree;
+        rank_t update = ((1.0 - ALPHA) * ALPHA) / out_degree;
 
         for (index_t edge = begin_edge; edge < end_edge; ++edge)
         {
@@ -66,7 +67,6 @@ std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)
 
     for (index_t node = 0; node < graph.nnodes; ++node)
     {
-        residual[node] *= (1.0 - ALPHA) * ALPHA;
         in_wl->push(node);
     }
 
@@ -124,6 +124,15 @@ int PageRankCheckErrors(std::vector<rank_t>& ranks, std::vector<rank_t>& regress
 {
     if (ranks.size() != regression.size()) {
         return std::abs((int64_t)ranks.size() - (int64_t)regression.size());
+    }
+
+    if (FLAGS_norm) // L1 normalization  
+    {
+        rank_t ranks_sum = 0.0, regression_sum = 0.0;
+        for (auto val : ranks) ranks_sum += val;
+        for (auto val : regression) regression_sum += val;
+        for (auto& val : ranks) val /= ranks_sum;
+        for (auto& val : regression) val /= regression_sum;
     }
 
     struct pr_pair {
