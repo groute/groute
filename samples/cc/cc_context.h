@@ -89,12 +89,6 @@ namespace cc
                 exit(0);
             }
 
-            if (FLAGS_verbose)
-            {
-                if (!FLAGS_undirected)  printf("undirected=false, expecting a directed (not symmetric) graph, keeping all edges\n");
-                else                    printf("undirected=true,  expecting an undirected (symmetric) graph, removing bidirectional edges\n");
-            }
-
             LoadGraph(host_edges, &nvtxs, &nedges, graph, FLAGS_undirected);
             host_parents.resize(nvtxs);
 

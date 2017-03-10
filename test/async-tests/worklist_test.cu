@@ -40,65 +40,34 @@
 
 #include <groute/event_pool.h>
 #include <groute/dwl/distributed_worklist.cuh>
+#include <groute/dwl/workers.cuh>
 
 #include <utils/cuda_utils.h>
 
 
-__global__ void CountKernel(int *buffer, int count, int offset, int *bins)
-{
-    int tid = GTID;
-    if (tid < count)
-    {
-        atomicAdd(bins + buffer[tid] - offset, 1);
-    }
-}
-
-
-std::vector<int64_t> multi_split(std::vector<int>& items, int segs, int seg_size)
-{
-    std::vector<int64_t> split_indexes(segs+1);
-
-    auto beg = items.begin();
-    for (int i = 0; i < segs; ++i)
-    {
-        split_indexes[i] = beg - items.begin();
-
-        auto split = std::partition(
-            beg, items.end(),
-            [seg_size, i](const int& item)
-        {
-            return (item / seg_size) == i;
-        }
-        );
-
-        beg = split;
-    }
-
-    split_indexes[segs] = items.size();
-
-    return split_indexes;
-}
-
-
-typedef utils::SharedArray<int> Array;
-typedef utils::SharedValue<int> WorkCounter;
-
-
-struct Splitter
-{
-    int split_val;
-
-    Splitter(int split_val) : split_val(split_val) { }
-
-    __device__ __host__ bool operator()(int val) const
-    {
-        return val < split_val;
-    }
-};
-
-
 namespace histogram
 {
+    struct CountWork
+    {
+        template<
+            typename WorkSource, typename WorkTarget>
+            __device__ static void work(
+            const WorkSource& work_source, WorkTarget& work_target,
+            int offset, int *bins
+            )
+        {
+            uint32_t tid = TID_1D;
+            uint32_t nthreads = TOTAL_THREADS_1D;
+
+            uint32_t work_size = work_source.get_size();
+
+            for (uint32_t i = 0 + tid; i < work_size; i += nthreads)
+            {
+                atomicAdd(bins + work_source.get_work(i) - offset, 1);
+            }
+        }
+    };
+
     struct DWCallbacks
     {
         __device__ __forceinline__ groute::SplitFlags on_receive(int work)
@@ -194,7 +163,10 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
         callbacks[worker_endpoints[i]] = histogram::DWCallbacks(i, histo_seg_size);
     }
 
-    groute::DistributedWorklist<int, int, histogram::DWCallbacks> distributed_worklist(context, { /*No sources*/ }, worker_endpoints, callbacks, exch_packet_size, num_exch_buffs, 0);
+    typedef groute::Worker<int, int, histogram::DWCallbacks, histogram::CountWork, int, int*> WorkerType;
+
+    groute::DistributedWorklist<int, int, histogram::DWCallbacks, WorkerType> 
+        distributed_worklist(context, { /*No host sources*/ }, worker_endpoints, callbacks, exch_packet_size, num_exch_buffs, 0);
 
     std::vector<std::thread> workers;
     groute::internal::Barrier barrier(ngpus);
@@ -211,7 +183,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             auto input_fut = receiver_links[i].PipelinedReceive();
             auto input_seg = input_fut.get();
 
-            distributed_worklist.ReportWork(input_seg.GetSegmentSize(), 0, "", i, true);
+            distributed_worklist.ReportInitialWork(input_seg.GetSegmentSize(), i);
 
             barrier.Sync();
 
@@ -219,33 +191,11 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             // Start processing  
             //
 
-            auto& input_worklist = worklist_peer->GetLocalInputWorklist(); 
-
             input_seg.Wait(stream.cuda_stream);
             worklist_peer->SplitSend(input_seg, stream);
 
-            while (true)
-            {
-                auto input_segs = worklist_peer->WaitForLocalWork(stream);
-                size_t total_segs_size = 0;
-
-                if (input_segs.empty()) break;
-
-                for (auto seg : input_segs)
-                {
-                    dim3 count_block_dims(32, 1, 1);
-                    dim3 count_grid_dims(round_up(seg.GetSegmentSize(), count_block_dims.x), 1, 1);
-
-                    CountKernel <<< count_grid_dims, count_block_dims, 0, stream.cuda_stream >>>
-                        (seg.GetSegmentPtr(), seg.GetSegmentSize(), i*histo_seg_size, dev_segs[i]);
-
-                    input_worklist.PopItemsAsync(seg.GetSegmentSize(), stream.cuda_stream);
-                    total_segs_size += seg.GetSegmentSize();
-                }
-                
-                // report work
-                distributed_worklist.ReportWork(0, (int)total_segs_size, "", i);
-            }
+            // Loop over the work until convergence  
+            distributed_worklist.Work(i, stream, i*histo_seg_size, dev_segs[i]);
 
             stream.Sync();
         });

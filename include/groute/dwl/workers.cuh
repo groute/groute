@@ -314,6 +314,15 @@ namespace groute {
     {
         Endpoint m_endpoint;
 
+        void KernelSizing(dim3& grid_dims, dim3& block_dims, uint32_t work_size) const
+        {
+            dim3 bd(256, 1, 1);
+            dim3 gd(round_up(work_size, bd.x), 1, 1);
+        
+            grid_dims = gd;
+            block_dims = bd;
+        }
+
         static const char* WorkerName() { return "UnoptimizedWorker"; }
         static const char* KernelName() { return "WorkKernel"; }
         
@@ -345,11 +354,11 @@ namespace groute {
                         KernelSizing(grid_dims, block_dims, subseg.GetSegmentSize());
 
                         Marker::MarkWorkitems(subseg.GetSegmentSize(), KernelName());
-                        WorkKernel <dev::WorkSourceArray<index_t>, TLocal, TRemote, DWCallbacks, TWork, WorkArgs...>
+                        WorkKernel <dev::WorkSourceArray<TLocal>, TLocal, TRemote, DWCallbacks, TWork, WorkArgs...>
 
                             <<< grid_dims, block_dims, 0, stream.cuda_stream >>> (
 
-                                dev::WorkSourceArray<index_t>(subseg.GetSegmentPtr(), subseg.GetSegmentSize()),
+                                dev::WorkSourceArray<TLocal>(subseg.GetSegmentPtr(), subseg.GetSegmentSize()),
                                 workspace.DeviceObject(),
                                 callbacks,
                                 args...
