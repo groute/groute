@@ -5,34 +5,22 @@
       <UniqueIdentifier>{ea7f8508-5651-4ff0-bac3-f1814cddadf1}</UniqueIdentifier>
     </Filter>
     <Filter Include="groute">
-      <UniqueIdentifier>{4f76d359-70cc-4cf1-8a32-ae2c004687c7}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="groute\internal">
-      <UniqueIdentifier>{eaf48a8c-5c97-42eb-b94c-a6ee1cc78c3b}</UniqueIdentifier>
+      <UniqueIdentifier>{1128a2aa-a91c-489f-bc7c-6366178c3a47}</UniqueIdentifier>
     </Filter>
     <Filter Include="groute\graphs">
-      <UniqueIdentifier>{562324f0-0dc5-459f-9f65-b7899dff54aa}</UniqueIdentifier>
+      <UniqueIdentifier>{991f60b4-595d-44ca-bb76-6e2f775353d7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\dwl">
+      <UniqueIdentifier>{f56bfe2d-42e8-4f72-9d3f-2b9a4820f33b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\device">
+      <UniqueIdentifier>{da8d7456-f952-4eb6-9ccf-0ed1573f7c69}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\internal">
+      <UniqueIdentifier>{bb4f079b-de97-44cf-b45c-a5c926d69e38}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\include\groute\event_pool.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\common.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\memory_pool.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\context.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\router.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\include\utils\parser.h">
       <Filter>utils</Filter>
     </ClInclude>
@@ -45,14 +33,44 @@
     <ClInclude Include="..\..\include\utils\interactor.h">
       <Filter>utils</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\include\utils\markers.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="cc_common.h" />
+    <ClInclude Include="cc_config.h" />
+    <ClInclude Include="cc_context.h" />
+    <ClInclude Include="cc_kernels.cuh" />
+    <ClInclude Include="cc_load.h" />
+    <ClInclude Include="cc_partitioner.h" />
+    <ClInclude Include="..\..\include\groute\common.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\communication.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\context.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\event_pool.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\groute.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\link.h">
+      <Filter>groute</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\include\groute\memcpy.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
+    <ClInclude Include="..\..\include\groute\memory_pool.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\utils\markers.h">
-      <Filter>utils</Filter>
+    <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\router.h">
+      <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\graphs\common.h">
       <Filter>groute\graphs</Filter>
@@ -63,44 +81,44 @@
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h">
       <Filter>groute\graphs</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h">
-      <Filter>groute\graphs</Filter>
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh">
+      <Filter>groute\dwl</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h">
-      <Filter>groute\graphs</Filter>
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\counter.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\queue.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\signal.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
+      <Filter>groute\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h">
       <Filter>groute\internal</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\internal\worker.h">
       <Filter>groute\internal</Filter>
-    </ClInclude>
-    <ClInclude Include="cc_common.h" />
-    <ClInclude Include="cc_config.h" />
-    <ClInclude Include="cc_context.h" />
-    <ClInclude Include="cc_kernels.cuh" />
-    <ClInclude Include="cc_load.h" />
-    <ClInclude Include="cc_partitioner.h" />
-    <ClInclude Include="..\..\include\groute\link.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
-      <Filter>groute\internal</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\communication.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\cta_work.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_worker.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\groute.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\policy.h">
-      <Filter>groute</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
