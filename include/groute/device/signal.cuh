@@ -115,8 +115,8 @@ namespace groute {
 
             while (signal == prev_signal)
             {
-                std::this_thread::yield();
-                if (stream.Query()) // Means kernel is done
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                if (stream.Query()) // Means kernel is done (TODO: effects profiling)
                 {
                     signal = *m_signal_host; // Make sure to read any later signal as well
                     break;

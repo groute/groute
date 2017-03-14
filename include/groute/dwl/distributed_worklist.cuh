@@ -298,7 +298,7 @@ namespace groute {
         void PopLoop() // Pops items ASAP from circular 'send' queue
         {
             m_context.SetDevice(m_endpoint);
-            Stream stream = m_context.CreateStream(m_endpoint);
+            Stream stream = m_context.CreateStream(m_endpoint, SP_High);
 
             while (true)
             {
@@ -338,13 +338,13 @@ namespace groute {
             size_t mem_size;
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
-            m_receive_worklist = CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "receive");
+            m_receive_worklist = CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "in");
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_out, mem_size, AF_PO2);
-            m_send_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "send");
+            m_send_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "out");
 
             mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_pass, mem_size, AF_PO2);
-            m_pass_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); // TODO: should be relative to chunk_size and num_buffers
+            m_pass_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); 
 
             for (size_t i = 0; i < m_num_workspaces; i++)
             {
@@ -446,7 +446,7 @@ namespace groute {
 
         void SignalRemoteWork(const Event& ev) override
         {
-            // This method is called by a single thread (worker) 
+            // This method should be called by a single thread (worker) 
 
             ev.Wait(m_send_stream);
 
@@ -549,6 +549,7 @@ namespace groute {
             // Second phase: reserving available memory for local work-queues after links allocation   
             for (Endpoint worker : m_work_endpoints)
             {
+                m_context.SetDevice(worker);
                 m_peers[worker]->InitWorklists();
             }
         }
