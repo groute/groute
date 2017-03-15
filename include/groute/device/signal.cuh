@@ -105,18 +105,19 @@ namespace groute {
             return dev::Signal(m_signal_dev);
         }
 
-        volatile int * GetDevPtr() const { return m_signal_dev; }
+        volatile int * DevicePtr() const { return m_signal_dev; }
 
         int Peek() const { return *m_signal_host; }
 
-        int WaitForSignal(int prev_signal, Stream& stream)
+        int WaitForSignal(int prev_signal, volatile bool& exit)
         {
             int signal = *m_signal_host;
 
             while (signal == prev_signal)
             {
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
-                if (stream.Query()) // Means kernel is done (TODO: effects profiling)
+                std::this_thread::yield();
+                //std::this_thread::sleep_for(std::chrono::microseconds(1));
+                if (exit) 
                 {
                     signal = *m_signal_host; // Make sure to read any later signal as well
                     break;

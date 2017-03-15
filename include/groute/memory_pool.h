@@ -48,7 +48,6 @@ namespace groute {
     {
         AF_None = 0,
         AF_PO2 = 1 << 0, // is allocation required to be in power-of-two size 
-        //AF_Other = 1 << 1,
     };
 
     class MemoryPool

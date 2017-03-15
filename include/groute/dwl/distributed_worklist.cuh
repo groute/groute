@@ -113,7 +113,7 @@ namespace groute {
         IDistributedWorklist < TLocal, TRemote >& m_distributed_worklist;
 
         Endpoint m_endpoint;
-        size_t m_chunk_size, m_num_buffers, m_num_workspaces;
+        size_t m_chunk_size; // Chunk size used for router links
         DWCallbacks m_device_callbacks;
 
         Counter m_filter_counter; // split-receive filter counter
@@ -332,23 +332,29 @@ namespace groute {
         // Internal peer API, used by DistributedWorklist (friend class)
         //
         
-        void InitWorklists()
+        void AllocateLinks(Router<TRemote>& router, size_t num_buffers)
+        {
+            m_link_in = groute::Link<TRemote>(router, m_endpoint, m_chunk_size, num_buffers);
+            m_link_out = groute::Link<TRemote>(m_endpoint, router);
+        }
+
+        void AllocateQueues(size_t num_workspaces)
         {
             void* mem_buffer;
             size_t mem_size;
 
-            mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
             m_receive_worklist = CircularWorklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "in");
 
-            mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_out, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_out, mem_size, AF_PO2);
             m_send_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "out");
 
-            mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_pass, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_pass, mem_size, AF_PO2);
             m_pass_worklist = CircularWorklist<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); 
 
-            for (size_t i = 0; i < m_num_workspaces; i++)
+            for (size_t i = 0; i < num_workspaces; i++)
             {
-                mem_buffer = m_context.Alloc(FLAGS_wl_alloc_factor_local / m_num_workspaces, mem_size);
+                mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_local / num_workspaces, mem_size);
                 m_local_workspaces.push_back(Worklist<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal)));
             }
 
@@ -356,13 +362,16 @@ namespace groute {
             m_send_worklist.ResetAsync((cudaStream_t)0);
             m_pass_worklist.ResetAsync((cudaStream_t)0);
 
-            for (size_t i = 0; i < m_num_workspaces; i++)
+            for (size_t i = 0; i < num_workspaces; i++)
             {
                 m_local_workspaces[i].ResetAsync((cudaStream_t)0);
             }
 
-            GROUTE_CUDA_CHECK(cudaStreamSynchronize((cudaStream_t)0)); // just in case
+            GROUTE_CUDA_CHECK(cudaStreamSynchronize((cudaStream_t)0)); // Just in case
+        }
 
+        void Run()
+        {
             m_send_stream = m_context.CreateStream(m_endpoint);
             m_send_bounds = m_pass_worklist.GetBounds(m_send_stream);
 
@@ -381,15 +390,11 @@ namespace groute {
         }
     public:
         DistributedWorklistPeer(
-            Context& context, Router<TRemote>& router, IDistributedWorklist < TLocal, TRemote >& distributed_worklist,
-            int priority_threshold, const DWCallbacks& device_callbacks,
-            Endpoint endpoint, size_t chunk_size, size_t num_buffers, size_t num_workspaces)
+            Context& context, IDistributedWorklist < TLocal, TRemote >& distributed_worklist,
+            int priority_threshold, const DWCallbacks& device_callbacks, Endpoint endpoint, size_t chunk_size)
             :
-            m_context(context), m_endpoint(endpoint), m_distributed_worklist(distributed_worklist),
-            m_chunk_size(chunk_size), m_num_buffers(num_buffers), m_num_workspaces(num_workspaces),
-            m_current_threshold(priority_threshold), m_device_callbacks(device_callbacks),
-            m_link_in(router, endpoint, chunk_size, num_buffers),
-            m_link_out(endpoint, router)
+            m_context(context), m_distributed_worklist(distributed_worklist), m_endpoint(endpoint),
+            m_chunk_size(chunk_size), m_device_callbacks(device_callbacks), m_current_threshold(priority_threshold)
         {
         }
 
@@ -446,7 +451,9 @@ namespace groute {
 
         void SignalRemoteWork(const Event& ev) override
         {
+            //
             // This method should be called by a single thread (worker) 
+            //
 
             ev.Wait(m_send_stream);
 
@@ -514,18 +521,18 @@ namespace groute {
             m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
             m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0)
         {
-            if (workers.size() != callbacks.size()) throw groute::exception("DW parameter mismatch (workers <-> callbacks)");
+            if (workers.size() != callbacks.size()) throw groute::exception("DWL parameter mismatch (workers <-> callbacks)");
 
             if (FLAGS_verbose)
             {
                 printf(
-                    "DW configuration: chunk: %llu, buffers: %llu, priority -> [delta: %d, initial threshold: %d]\n", 
+                    "\nDistributed Worklist configuration: \n\tchunk: %llu, buffers: %llu, priority delta: %d, initial threshold: %d\n", 
                     chunk_size, num_buffers, priority_delta, m_current_threshold);
             }
 
             if (priority_delta > 0 && !WorkerType::soft_prio)
             {
-                printf("Note: the used TWorker type does not support soft priority scheduling\n");
+                printf("Note: the Worker type used for the DWL does not support soft priority scheduling\n");
             }
 
             for (Endpoint source : sources)
@@ -536,21 +543,25 @@ namespace groute {
 
             for (Endpoint worker : m_work_endpoints)
             {
+                if (callbacks.find(worker) == callbacks.end()) throw groute::exception("DWL: missing DWCallbacks for worker endpoint");
+
                 m_endpoint_work[worker] = 0;
                 m_context.SetDevice(worker);
 
-                if (callbacks.find(worker) == callbacks.end()) throw groute::exception("DW: missing DWCallbacks for worker");
-
                 m_peers[worker] = groute::make_unique< PeerType >(
-                    m_context, m_router, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size, num_buffers, WorkerType::num_workspaces);
+                    m_context, *this, (int)m_current_threshold, callbacks.at(worker), worker, chunk_size);
+                m_peers[worker]->AllocateLinks(m_router, num_buffers);
                 m_workers[worker] = groute::make_unique< WorkerType >(m_context, worker);
             }
+
+            if (FLAGS_verbose) printf("Distributed Worklist starting to run \n");
 
             // Second phase: reserving available memory for local work-queues after links allocation   
             for (Endpoint worker : m_work_endpoints)
             {
                 m_context.SetDevice(worker);
-                m_peers[worker]->InitWorklists();
+                m_peers[worker]->AllocateQueues(WorkerType::num_workspaces);
+                m_peers[worker]->Run();
             }
         }
 
@@ -629,7 +640,7 @@ namespace groute {
             {
                 if (m_deferred_work_counter == 0)
                 {
-                    if (FLAGS_verbose) printf("Distributed Worklist Shutting Down successfully: %s\n", caller);
+                    if (FLAGS_verbose) printf("Distributed Worklist shutting down successfully (%s)\n", caller);
                     m_router.Shutdown();
                 }
 

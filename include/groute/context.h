@@ -371,48 +371,28 @@ namespace groute {
 
             return m_memory_pools.at(physical_dev)->Alloc(hint / endpoints, size, flags);
         }
-
-        void* Alloc(size_t size)
-        {
-            int current_physical_dev;
-            GROUTE_CUDA_CHECK(cudaGetDevice(&current_physical_dev));
-            return m_memory_pools.at(current_physical_dev)->Alloc(size);
-        }
-
-        void* Alloc(double hint, size_t& size, AllocationFlags flags = AF_None)
-        {
-            int current_physical_dev;
-            GROUTE_CUDA_CHECK(cudaGetDevice(&current_physical_dev));
-
-            int endpoints = 0; // Count the number of endpoints using the physical device  
-            for (auto& p : m_endpoint_map)
-            {
-                if (p.second == current_physical_dev) ++endpoints;
-            }
-            return m_memory_pools.at(current_physical_dev)->Alloc(hint / endpoints, size, flags);
-        }
         
         // -----------------
 
         void PrintStatus() const
         {
-            printf("\nDevice map:");
+            printf("\n\tEndpoint map (virtual endpoint, physical device): ");
             for (auto& p : m_endpoint_map)
             {
-                printf("\n\tVirtual: %d,\tPhysical: %d", (Endpoint::identity_type)p.first, p.second);
+                printf(" (%d, %d)", (Endpoint::identity_type)p.first, p.second);
             }
 
-            printf("\nMemcpy lanes:");
+            printf("\n\tMemcpy lanes (endpoint, lane type): ");
             for (auto& p : m_memcpy_invokers)
             {
-                printf("\n\tDevice (virtual): %d,\tLane: %s", (Endpoint::identity_type)p.first.first, p.first.second == In ? "In" : p.first.second == Out ? "Out" : "Intra" );
+                printf(" (%d, %s)", (Endpoint::identity_type)p.first.first, p.first.second == In ? "In" : p.first.second == Out ? "Out" : "Intra" );
             }
-            printf("\nFragmentation: %d", m_fragment_size);
+            printf("\n\tFragmentation: %d", m_fragment_size);
 
-            printf("\nEvent pools:");
+            printf("\n\tEvent pools (device, events): ");
             for (auto& p : m_event_pools)
             {
-                printf("\n\tDevice (physical): %d,\tCached events: %d", p.first, p.second->GetCachedEventsNum());
+                printf(" (%d, %d)", p.first, p.second->GetCachedEventsNum());
             }
         }
     };

@@ -337,8 +337,7 @@ namespace groute {
 
         void Init(StreamPriority priority)
         {
-            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
-            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+            Destroy();
 
             if (priority == SP_Default)
             {
@@ -356,6 +355,15 @@ namespace groute {
             }
         }
 
+        void Destroy()
+        {
+            if (cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
+            if (sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+
+            cuda_stream = nullptr;
+            sync_event = nullptr;
+        }
+
         Stream(const Stream& other) = delete;
 
         Stream(Stream&& other) : cuda_stream(other.cuda_stream), sync_event(other.sync_event)
@@ -368,8 +376,7 @@ namespace groute {
 
         Stream& operator=(Stream&& other) 
         {
-            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
-            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+            Destroy();
 
             cuda_stream = other.cuda_stream;
             sync_event = other.sync_event;
@@ -382,8 +389,7 @@ namespace groute {
 
         ~Stream()
         {
-            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
-            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+            Destroy();
         }
 
         void Sync() const

@@ -103,7 +103,7 @@ namespace groute {
     */
 
     /*
-    * @brief An optimized DW worker, with complete kernel fusion and soft-priority scheduling   
+    * @brief An optimized DWL worker, with complete kernel fusion and soft-priority scheduling   
     */
     template<bool IterationFusion, typename TLocal, typename TRemote, typename TPrio, typename DWCallbacks, typename TWork, typename... WorkArgs>
     class FusedWorker
@@ -139,6 +139,13 @@ namespace groute {
         Signal m_work_signal;   
 
         std::vector<int> m_work_counts; // Trace work for each iteration  
+
+        /// Used to report fused kernel has exited  
+        static void CUDART_CB ReportExit(cudaStream_t stream, cudaError_t status, void *userData)
+        {
+            volatile bool* exit = (volatile bool*)userData;
+            *exit = true;
+        }
 
     public:
         FusedWorker(Context& context, Endpoint endpoint) : m_endpoint(endpoint)
@@ -243,29 +250,30 @@ namespace groute {
                     remote_input->DeviceObject(), remote_output->DeviceObject(),
                     FLAGS_fused_chunk_size, priority_threshold,
                     immediate_work_counter, deferred_work_counter,
-                    m_kernel_internal_counter, m_work_signal.GetDevPtr(),
+                    m_kernel_internal_counter, m_work_signal.DevicePtr(),
                     m_barrier_lifetime,                       
                     callbacks,
                     args...
                     );
 
-                stream.BeginSync(); // Records an event  
+                volatile bool exit = false;
+                GROUTE_CUDA_CHECK(cudaStreamAddCallback(stream.cuda_stream, ReportExit, (void*)&exit, 0)); // Schedule an exit report  
 
-                while (true) // Loop on work signals from the running kernel
+                while (true) // Loop on remote work signals from fused kernel
                 {
-                    int signal = m_work_signal.WaitForSignal(prev_signal, stream);
+                    int signal = m_work_signal.WaitForSignal(prev_signal, exit);
                     if (signal == prev_signal) break; // Exit was signaled  
 
                     int work = signal - prev_signal;
-                    distributed_worklist.ReportWork(work, 0, m_endpoint);
+                    distributed_worklist.ReportWork(work, 0, m_endpoint); // Remote work is always considered non-deferred by the sender
 
                     prev_signal = signal; // Update
                     peer->SignalRemoteWork(Event()); // Trigger work sending to router
                 }
 
-                stream.EndSync(); // Sync on the kernel        
+                stream.Sync(); // Sync on the kernel (no need, but just in case)     
 
-                // Some work was done by the kernel, report it   
+                // Some local work was produced/consumed by the kernel, report it   
                 distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, m_endpoint);
                 distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, m_endpoint);
 
@@ -307,7 +315,7 @@ namespace groute {
     };
 
     /*
-    * @brief A simple unoptimized DW worker 
+    * @brief A simple unoptimized DWL worker 
     */
     template<typename TLocal, typename TRemote, typename DWCallbacks, typename TWork, typename... WorkArgs>
     class Worker

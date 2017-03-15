@@ -64,20 +64,11 @@ DEFINE_bool(single, false, "Run the single GPU variant");
 DEFINE_bool(async_multi, true, "Run the async multigpu variant");
 DEFINE_bool(opt, true, "Run the optimized (prio + fusion) async multigpu variant");
 
-
-// Here as a workaround for now
-#ifndef NDEBUG
-#define VERBOSE true
-#define REPETITIONS_DEFAULT 1
-#else
-#define VERBOSE false
-#define REPETITIONS_DEFAULT 1
-#endif
 DEFINE_string(graphfile, "", "A file with a graph in Dimacs 10 format");
 DEFINE_bool(ggr, true, "Graph file is a Galois binary GR file");
-DEFINE_bool(verbose, VERBOSE, "Verbose prints");
+DEFINE_bool(verbose, true, "Verbose prints");
 DEFINE_bool(trace, false, "Trace prints (effects performance)");
-DEFINE_int32(repetitions, REPETITIONS_DEFAULT, "Repetitions of GPU tests");
+DEFINE_int32(repetitions, 1, "Repetitions of GPU tests"); // Not used
 DEFINE_bool(gen_graph, false, "Generate a random graph");
 DEFINE_int32(gen_nnodes, 100000, "Number of nodes for random graph generation");
 DEFINE_int32(gen_factor, 10, "A factor number for graph generation");

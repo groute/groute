@@ -226,7 +226,7 @@ namespace utils {
                 }
 
                 if (FLAGS_verbose) {
-                    printf("\n\nContext status (before):"); context.PrintStatus(); printf("\n\n");
+                    printf("\nContext status (before):"); context.PrintStatus(); printf("\n");
                 }
 
                 groute::graphs::multi::CSRGraphAllocator
@@ -292,7 +292,7 @@ namespace utils {
 
                 Stopwatch sw(true); // All threads are running, start timing
                 
-                IntervalRangeMarker range_marker(context.nedges, "begin");
+                IntervalRangeMarker range_marker(context.nedges, "work");
 
                 barrier.Sync(); // Signal to devices  
 
@@ -304,7 +304,7 @@ namespace utils {
                 if (FLAGS_repetitions > 1)
                     printf("\nWarning: ignoring repetitions flag, running just one repetition (not implemented)\n");
 
-                printf("\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
+                printf("\n\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
 
                 for (int i = 0; i < ngpus; ++i)
                 {
@@ -313,7 +313,7 @@ namespace utils {
                 }
 
                 if (FLAGS_verbose) {
-                    printf("\n\nContext status (after):"); context.PrintStatus(); printf("\n\n");
+                    printf("\nContext status (after):"); context.PrintStatus(); printf("\n");
                 }
 
                 // Gather
