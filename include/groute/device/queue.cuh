@@ -41,14 +41,18 @@
 
 #include <cub/util_ptx.cuh>
 
-#include <groute/event_pool.h>
+//
+// Common device-related MACROS
+//
 
-#define WARP_SIZE 32
-#define DBS 256
-
+// Default block size for system kernels  
+#define GROUTE_BLOCK_THREADS 256
 #define TID_1D (threadIdx.x + blockIdx.x * blockDim.x)
 #define TOTAL_THREADS_1D (gridDim.x * blockDim.x)
 
+//
+//
+//
 
 namespace groute {
     namespace dev {
@@ -383,7 +387,7 @@ namespace groute {
     template<typename T>
     class Worklist
     {
-        enum { WS = 32 };
+        enum { NUM_COUNTERS = 32 };
 
         //
         // device buffer / counters 
@@ -441,7 +445,7 @@ namespace groute {
 
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaMalloc(&m_data, sizeof(T) * m_capacity));
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, WS * sizeof(uint32_t)));
+            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, NUM_COUNTERS * sizeof(uint32_t)));
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_count, sizeof(uint32_t)));
         }
     
@@ -458,16 +462,16 @@ namespace groute {
     public:
         DeviceObjectType DeviceObject() const
         {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
+            assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
             return dev::Worklist<T>(m_data, m_counters + m_current_slot, m_capacity);
         }
 
         void ResetAsync(cudaStream_t stream)
         {
-            m_current_slot = (m_current_slot + 1) % WS;
+            m_current_slot = (m_current_slot + 1) % NUM_COUNTERS;
             if (m_current_slot == 0)
             {
-                ResetCounters <<< 1, WS, 0, stream >>>(m_counters, WS);
+                ResetCounters <<< 1, NUM_COUNTERS, 0, stream >>>(m_counters, NUM_COUNTERS);
             }
         }
 
@@ -485,7 +489,7 @@ namespace groute {
         
         uint32_t GetLength(const Stream& stream) const
         {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
+            assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
 
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_count, m_counters + m_current_slot, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             stream.Sync();

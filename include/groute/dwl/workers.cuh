@@ -118,8 +118,7 @@ namespace groute {
         enum
         {
             IMMEDIATE_COUNTER = 0,
-            DEFERRED_COUNTER = 1,
-            BLOCK_SIZE = 256 
+            DEFERRED_COUNTER = 1
         };
         static const char* WorkerName() { return "FusedWorker"; }
         static const char* KernelName() { return "FusedWorkKernel"; }
@@ -167,7 +166,7 @@ namespace groute {
 
             int occupancy_per_MP = 0;
             cudaOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy_per_MP,
-                groute::FusedWorkKernel <StoppingCondition, TLocal, TRemote, TPrio, DWCallbacks, TWork, WorkArgs... >, BLOCK_SIZE, 0);
+                groute::FusedWorkKernel <StoppingCondition, TLocal, TRemote, TPrio, DWCallbacks, TWork, WorkArgs... >, GROUTE_BLOCK_THREADS, 0);
 
             size_t fused_work_blocks 
                 = (props.multiProcessorCount - 1) * occupancy_per_MP; // -1 for split-receive  
@@ -180,7 +179,7 @@ namespace groute {
             }
 
             // Setup the fused block/grid dimensions 
-            m_block_dims = dim3(BLOCK_SIZE, 1, 1);
+            m_block_dims = dim3(GROUTE_BLOCK_THREADS, 1, 1);
             m_grid_dims = dim3(fused_work_blocks, 1, 1);
 
             // Setup the barrier
@@ -324,7 +323,7 @@ namespace groute {
 
         void KernelSizing(dim3& grid_dims, dim3& block_dims, uint32_t work_size) const
         {
-            dim3 bd(256, 1, 1);
+            dim3 bd(GROUTE_BLOCK_THREADS, 1, 1);
             dim3 gd(round_up(work_size, bd.x), 1, 1);
         
             grid_dims = gd;

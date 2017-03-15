@@ -161,7 +161,7 @@ namespace groute {
         {
             m_filter_counter.ResetAsync(stream.cuda_stream);
 
-            dim3 block_dims(DBS, 1, 1);
+            dim3 block_dims(GROUTE_BLOCK_THREADS, 1, 1);
             dim3 grid_dims(round_up(received_work.GetSegmentSize(), block_dims.x), 1, 1);
 
             SplitReceiveKernel <TLocal, TRemote, DWCallbacks> << < grid_dims, block_dims, 0, stream.cuda_stream >> >(
@@ -198,7 +198,7 @@ namespace groute {
         void InvokeSplitSend(
             const Segment<TLocal>& sent_work, Stream& stream)
         {
-            dim3 block_dims(DBS, 1, 1);
+            dim3 block_dims(GROUTE_BLOCK_THREADS, 1, 1);
             dim3 grid_dims(round_up(sent_work.GetSegmentSize(), block_dims.x), 1, 1);
 
             SplitSendKernel <TLocal, TRemote, DWCallbacks> << < grid_dims, block_dims, 0, stream.cuda_stream >> >(
