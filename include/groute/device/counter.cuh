@@ -71,12 +71,22 @@ namespace groute {
         };
     }
 
+    namespace counter {
+    namespace kernels {
+        static __global__ void ResetCounters(uint32_t* counters, uint32_t num_counters)
+        {
+            if (TID_1D < num_counters)
+                counters[TID_1D] = 0;
+        }
+    }
+    }
+
     /*
-    * @brief Host lifetime manager for dev::Counter
+    * @brief Host controller object for dev::Counter
     */
     class Counter  
     {
-        enum { WS = 32 };
+        enum { NUM_COUNTERS = 32 };
 
         //
         // device buffer / counters 
@@ -104,7 +114,7 @@ namespace groute {
     private:
         void Alloc()
         {
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, WS * sizeof(uint32_t)));
+            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, NUM_COUNTERS * sizeof(uint32_t)));
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_counter, sizeof(uint32_t)));
         }
     
@@ -117,29 +127,29 @@ namespace groute {
     public:
         DeviceObjectType DeviceObject() const
         {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
+            assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
             return dev::Counter(m_counters + m_current_slot);
         }
 
         template<typename T>
-        typename Worklist<T>::DeviceObjectType ToDeviceWorklist(T* data_ptr, uint32_t capacity) const
+        typename Queue<T>::DeviceObjectType ToDeviceQueue(T* data_ptr, uint32_t capacity) const
         {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
-            return dev::Worklist<T>(data_ptr, m_counters + m_current_slot, capacity);
+            assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
+            return dev::Queue<T>(data_ptr, m_counters + m_current_slot, capacity);
         }
 
         void ResetAsync(cudaStream_t stream)
         {
-            m_current_slot = (m_current_slot + 1) % WS;
+            m_current_slot = (m_current_slot + 1) % NUM_COUNTERS;
             if (m_current_slot == 0)
             {
-                ResetCounters <<< 1, WS, 0, stream >>>(m_counters, WS);
+                counter::kernels::ResetCounters <<< 1, NUM_COUNTERS, 0, stream >>>(m_counters, NUM_COUNTERS);
             }
         }
         
         uint32_t GetCount(const Stream& stream) const
         {
-            assert(m_current_slot >= 0 && m_current_slot < WS);
+            assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
 
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_counter, m_counters + m_current_slot, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             stream.Sync();

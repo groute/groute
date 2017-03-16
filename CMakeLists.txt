@@ -103,8 +103,8 @@ endif()
 # Groute async component tests
 cuda_add_executable(async-tests test/async-tests/main.cpp
                     test/async-tests/router_test.cu
-                    test/async-tests/worklist_test.cu
-                    test/async-tests/circular_worklist_test.cu)
+                    test/async-tests/dwl_test.cu
+                    test/async-tests/pc_queue_test.cu)
 
 target_link_libraries(async-tests gtest pthread dl ${EXTRA_LIBS})
 cuda_add_cublas_to_target(async-tests)

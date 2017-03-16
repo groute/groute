@@ -57,7 +57,7 @@ namespace groute {
     struct Worker
     {
     public:
-        static const int num_workspaces = ...;    
+        static const int num_local_queues = ...;    
         static const bool soft_prio = ...;
 
         Worker(Context& context, Endpoint endpoint) { ... }
@@ -109,7 +109,7 @@ namespace groute {
     class FusedWorker
     {
     public:
-        static const int num_workspaces = 2; // Part of the contract used by the DistributedWorklist    
+        static const int num_local_queues = 2; // Part of the contract used by the DistributedWorklist    
         static const bool soft_prio = true;  //
 
         typedef typename std::conditional<IterationFusion, NeverStop, RunNTimes<1>>::type StoppingCondition;
@@ -132,7 +132,7 @@ namespace groute {
         volatile int* m_work_counters[2];    
 
         // Used for globally deciding on work within the fused kernel  
-        uint32_t *m_kernel_internal_counter;  
+        uint32_t *m_device_counter;  
 
         // Used for signaling remote work was pushed into the circular-queue and can be sent to peers through the router
         Signal m_work_signal;   
@@ -155,8 +155,8 @@ namespace groute {
             *m_work_counters[IMMEDIATE_COUNTER] = 0;
             *m_work_counters[DEFERRED_COUNTER] = 0;
 
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_kernel_internal_counter, sizeof(int)));
-            GROUTE_CUDA_CHECK(cudaMemset(m_kernel_internal_counter, 0, sizeof(int)));
+            GROUTE_CUDA_CHECK(cudaMalloc(&m_device_counter, sizeof(int)));
+            GROUTE_CUDA_CHECK(cudaMemset(m_device_counter, 0, sizeof(int)));
 
             int dev;
             cudaDeviceProp props;
@@ -198,18 +198,18 @@ namespace groute {
 
             GROUTE_CUDA_CHECK(cudaFreeHost((void*)m_work_counters[IMMEDIATE_COUNTER]));
             GROUTE_CUDA_CHECK(cudaFreeHost((void*)m_work_counters[DEFERRED_COUNTER]));
-            GROUTE_CUDA_CHECK(cudaFree((void*)m_kernel_internal_counter));
+            GROUTE_CUDA_CHECK(cudaFree((void*)m_device_counter));
         }
 
         void Work(
             IDistributedWorklist <TLocal, TRemote>& distributed_worklist,
             IDistributedWorklistPeer <TLocal, TRemote, DWCallbacks>* peer, Stream& stream, const WorkArgs&... args)
         {
-            Worklist<TLocal>* immediate_worklist = &peer->GetLocalWorkspace(0);
-            Worklist<TLocal>* deferred_worklist = &peer->GetLocalWorkspace(1);
+            Queue<TLocal>* immediate_worklist = &peer->GetLocalQueue(0);
+            Queue<TLocal>* deferred_worklist = &peer->GetLocalQueue(1);
 
-            CircularWorklist<TRemote>*  remote_output = &peer->GetRemoteOutputWorklist();
-            CircularWorklist<TLocal>*  remote_input = &peer->GetLocalInputWorklist();
+            PCQueue<TRemote>*  remote_output = &peer->GetRemoteOutputQueue();
+            PCQueue<TLocal>*  remote_input = &peer->GetRemoteInputQueue();
 
             DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
@@ -249,7 +249,7 @@ namespace groute {
                     remote_input->DeviceObject(), remote_output->DeviceObject(),
                     FLAGS_fused_chunk_size, priority_threshold,
                     immediate_work_counter, deferred_work_counter,
-                    m_kernel_internal_counter, m_work_signal.DevicePtr(),
+                    m_device_counter, m_work_signal.DevicePtr(),
                     m_barrier_lifetime,                       
                     callbacks,
                     args...
@@ -267,7 +267,7 @@ namespace groute {
                     distributed_worklist.ReportWork(work, 0, m_endpoint); // Remote work is always considered non-deferred by the sender
 
                     prev_signal = signal; // Update
-                    peer->SignalRemoteWork(Event()); // Trigger work sending to router
+                    peer->SendRemoteWork(Event()); // Trigger work sending to router
                 }
 
                 stream.Sync(); // Sync on the kernel (no need, but just in case)     
@@ -288,7 +288,7 @@ namespace groute {
                     m_work_counts.push_back((int)(*m_work_counters[DEFERRED_COUNTER]) + (int)(*m_work_counters[IMMEDIATE_COUNTER]));
                 }
 
-                auto segs = peer->WaitForLocalWork(stream, priority_threshold);
+                auto segs = peer->WaitForInputWork(stream, priority_threshold);
 
                 if (FLAGS_trace)
                 {
@@ -334,7 +334,7 @@ namespace groute {
         static const char* KernelName() { return "WorkKernel"; }
         
     public:
-        static const int num_workspaces = 1;    
+        static const int num_local_queues = 1;    
         static const bool soft_prio = false;
 
         Worker(Context& context, Endpoint endpoint) : m_endpoint(endpoint) { }
@@ -343,13 +343,13 @@ namespace groute {
             IDistributedWorklist <TLocal, TRemote>& distributed_worklist,
             IDistributedWorklistPeer <TLocal, TRemote, DWCallbacks>* peer, Stream& stream, const WorkArgs&... args)
         {
-                auto& input_worklist = peer->GetLocalInputWorklist();
-                auto& workspace = peer->GetLocalWorkspace(0); 
+                auto& input_worklist = peer->GetRemoteInputQueue();
+                auto& workspace = peer->GetLocalQueue(0); 
                 DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
                 while (distributed_worklist.HasWork())
                 {
-                    auto input_segs = peer->WaitForLocalWork(stream);
+                    auto input_segs = peer->WaitForInputWork(stream);
                     size_t new_work = 0, performed_work = 0;
 
                     if (input_segs.empty()) continue;
@@ -371,11 +371,11 @@ namespace groute {
                                 args...
                                 );
 
-                        input_worklist.PopItemsAsync(subseg.GetSegmentSize(), stream.cuda_stream);
+                        input_worklist.PopAsync(subseg.GetSegmentSize(), stream.cuda_stream);
                         performed_work += subseg.GetSegmentSize();
                     }
 
-                    auto output_seg = workspace.ToSeg(stream);
+                    auto output_seg = workspace.GetSeg(stream);
                     new_work += output_seg.GetSegmentSize(); // Add the new work 
                     peer->SplitSend(output_seg, stream); // Call split-send
 

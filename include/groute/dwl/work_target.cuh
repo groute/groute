@@ -54,11 +54,11 @@ namespace groute {
         struct WorkTargetWorklist
         {
         private:
-            dev::Worklist<TLocal>& m_worklist;
+            dev::Queue<TLocal>& m_worklist;
             DWCallbacks& m_callbacks;
 
         public:
-            __device__ __forceinline__  WorkTargetWorklist(dev::Worklist<TLocal>& worklist, DWCallbacks& callbacks) : m_worklist(worklist), m_callbacks(callbacks) { }
+            __device__ __forceinline__  WorkTargetWorklist(dev::Queue<TLocal>& worklist, DWCallbacks& callbacks) : m_worklist(worklist), m_callbacks(callbacks) { }
 
             __device__ __forceinline__ void append_work(const TLocal& work)
             {
@@ -75,10 +75,10 @@ namespace groute {
         struct WorkTargetWorklist < T, T, DWCallbacks >
         {
         private:
-            dev::Worklist<T>& m_worklist;
+            dev::Queue<T>& m_worklist;
 
         public:
-            __device__ __forceinline__  WorkTargetWorklist(dev::Worklist<T>& worklist, DWCallbacks& callbacks) : m_worklist(worklist) { }
+            __device__ __forceinline__  WorkTargetWorklist(dev::Queue<T>& worklist, DWCallbacks& callbacks) : m_worklist(worklist) { }
 
             __device__ __forceinline__ void append_work(const T& work)
             {
@@ -90,12 +90,12 @@ namespace groute {
         struct WorkTargetSplitSend
         {
         private:
-            dev::CircularWorklist<TLocal>& m_remote_input;
-            dev::CircularWorklist<TRemote>& m_remote_output;
+            dev::PCQueue<TLocal>& m_remote_input;
+            dev::PCQueue<TRemote>& m_remote_output;
             DWCallbacks& m_callbacks;
 
         public:
-            __device__ __forceinline__  WorkTargetSplitSend(dev::CircularWorklist<TLocal>& remote_input, dev::CircularWorklist<TRemote>& remote_output, DWCallbacks& callbacks) :
+            __device__ __forceinline__  WorkTargetSplitSend(dev::PCQueue<TLocal>& remote_input, dev::PCQueue<TRemote>& remote_output, DWCallbacks& callbacks) :
                 m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
 
             __device__ __forceinline__ void append_work(const TLocal& unpacked)
@@ -138,12 +138,12 @@ namespace groute {
         struct WorkTargetSplitSend < T, T, DWCallbacks >
         {
         private:
-            dev::CircularWorklist<T>& m_remote_input;
-            dev::CircularWorklist<T>& m_remote_output;
+            dev::PCQueue<T>& m_remote_input;
+            dev::PCQueue<T>& m_remote_output;
             DWCallbacks& m_callbacks;
 
         public:
-            __device__ __forceinline__  WorkTargetSplitSend(dev::CircularWorklist<T>& remote_input, dev::CircularWorklist<T>& remote_output, DWCallbacks& callbacks) :
+            __device__ __forceinline__  WorkTargetSplitSend(dev::PCQueue<T>& remote_input, dev::PCQueue<T>& remote_output, DWCallbacks& callbacks) :
                 m_remote_input(remote_input), m_remote_output(remote_output), m_callbacks(callbacks) { }
 
             __device__ __forceinline__ void append_work(const T& unpacked)

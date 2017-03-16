@@ -359,7 +359,7 @@ namespace pr {
             groute::IDistributedWorklistPeer<local_work_t, remote_work_t, DWCallbacks>* peer, 
             TGraph graph, ResidualDatum residual, RankDatum ranks)
         {   
-            auto& workspace = peer->GetLocalWorkspace(0);
+            auto& workspace = peer->GetLocalQueue(0);
             DWCallbacks callbacks = peer->GetDeviceCallbacks();
 
             dim3 grid_dims, block_dims;
@@ -376,7 +376,7 @@ namespace pr {
                     graph, residual, ranks
                     );
 
-            auto output_seg = workspace.ToSeg(stream);
+            auto output_seg = workspace.GetSeg(stream);
             distributed_worklist.ReportWork(output_seg.GetSegmentSize(), 0, endpoint);
 
             peer->SplitSend(output_seg, stream); 
@@ -394,7 +394,7 @@ namespace pr {
                     graph, residual, ranks
                     );
 
-            output_seg = workspace.ToSeg(stream);
+            output_seg = workspace.GetSeg(stream);
             distributed_worklist.ReportWork(output_seg.GetSegmentSize(), graph.owned_nnodes(), endpoint);
 
             peer->SplitSend(output_seg, stream); 

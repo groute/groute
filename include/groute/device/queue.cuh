@@ -65,23 +65,26 @@ namespace groute {
         }
 
         //
-        // worklist classes (device):
+        // Queue classes (device):
         //
 
+        /*
+        * @brief A device-level Queue
+        */
         template<typename T>
-        class Worklist
+        class Queue
         {
         public:
             T* m_data;
             uint32_t* m_count;
             uint32_t m_capacity;
 
-            __host__ __device__ Worklist(T* data, uint32_t* count, uint32_t capacity) : 
+            __host__ __device__ Queue(T* data, uint32_t* count, uint32_t capacity) : 
                 m_data(data), m_count(count), m_capacity(capacity) { }
 
             __device__ __forceinline__ void append(const T& item) const
             {
-                uint32_t allocation = atomicAdd(m_count, 1); // just a naive atomic add
+                uint32_t allocation = atomicAdd(m_count, 1); // Just a naive atomic add
                 m_data[allocation] = item;
             }
 
@@ -105,7 +108,7 @@ namespace groute {
             {
                 uint32_t allocation = 0;
 
-                if (cub::LaneId() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // The leader thread  
                 {
                     allocation = atomicAdd((uint32_t *)m_count, warp_count);
                     assert(allocation + warp_count <= m_capacity);
@@ -129,47 +132,48 @@ namespace groute {
             {
                 return *m_count;
             }
+
+            // TODO: pop
         };
 
-        template<typename T, bool POWER_OF_TWO = true>
-        class CircularWorklist
+        /*
+        * @brief A device-level Producer-Consumer Queue
+        */
+        template<typename T>
+        class PCQueue
         {
             T* m_data;
-            volatile uint32_t *m_start, *m_end, *m_alloc_end;
-            uint32_t m_capacity;
+            volatile uint32_t *m_start, *m_end, *m_pending;
+            uint32_t m_capacity_mask;
 
         public:
-            __host__ __device__ CircularWorklist(T* data, uint32_t *start, uint32_t *end, uint32_t *alloc_end, uint32_t capacity) : 
-                m_data(data), m_start(start), m_end(end), m_alloc_end(alloc_end), m_capacity((POWER_OF_TWO ? (capacity - 1) : (capacity)))
+            __host__ __device__ PCQueue(T* data, uint32_t *start, uint32_t *end, uint32_t *pending, uint32_t capacity) : 
+                m_data(data), m_start(start), m_end(end), m_pending(pending), m_capacity_mask((capacity - 1))
             {
-                assert((capacity - 1 & capacity) == 0); // must be a power of two for handling circular overflow correctly  
+                assert((capacity - 1 & capacity) == 0); // Must be a power of two for handling circular overflow correctly  
             }
 
             __device__ __forceinline__ void reset()
             {
                 *m_start = 0; 
                 *m_end = 0;
-                *m_alloc_end = 0;
+                *m_pending = 0;
             }
 
-            __device__ __forceinline__ void pop_items(uint32_t items)
+            __device__ __forceinline__ void pop(uint32_t count)
             {
-                (*m_start) += items; 
+                (*m_start) += count; 
             }
 
-            __device__ __forceinline__ void sync_append_alloc()
+            __device__ __forceinline__ void sync_pending()
             {
-                *m_end = *m_alloc_end;
+                *m_end = *m_pending;
             }
 
             __device__ __forceinline__ void append(const T& item)
             {
-                uint32_t allocation = atomicAdd((uint32_t *)m_alloc_end, 1);
-
-                if (POWER_OF_TWO)
-                    m_data[allocation & m_capacity] = item;
-                else
-                    m_data[allocation % m_capacity] = item;
+                uint32_t allocation = atomicAdd((uint32_t *)m_pending, 1);
+                m_data[allocation & m_capacity_mask] = item;
             }
 
             __device__ void append_warp(const T& item)
@@ -179,46 +183,34 @@ namespace groute {
 
                 warp_active_count(first, offset, total);
 
-                if (offset == 0) // the leader thread  
+                if (offset == 0) // The leader thread  
                 {
-                    allocation = atomicAdd((uint32_t *)m_alloc_end, total);
-                    assert((allocation + total) - *m_start < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
+                    allocation = atomicAdd((uint32_t *)m_pending, total);
+                    assert((allocation + total) - *m_start < (m_capacity_mask + 1));
                 }
     
                 allocation = cub::ShuffleIndex(allocation, first);
-                
-                if (POWER_OF_TWO)
-                    m_data[(allocation + offset) & m_capacity] = item;
-                else
-                    m_data[(allocation + offset) % m_capacity] = item;
+                m_data[(allocation + offset) & m_capacity_mask] = item;
             }
 
             __device__ void append_warp(const T& item, int leader, int warp_count, int offset)
             {
                 uint32_t allocation = 0;
 
-                if (cub::LaneId() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // The leader thread  
                 {
-                    allocation = atomicAdd((uint32_t *)m_alloc_end, warp_count);
-                    assert((allocation + warp_count) - *m_start < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
+                    allocation = atomicAdd((uint32_t *)m_pending, warp_count);
+                    assert((allocation + warp_count) - *m_start < (m_capacity_mask + 1));
                 }
     
                 allocation = cub::ShuffleIndex(allocation, leader);
-                
-                if (POWER_OF_TWO)
-                    m_data[(allocation + offset) & m_capacity] = item;
-                else
-                    m_data[(allocation + offset) % m_capacity] = item;
+                m_data[(allocation + offset) & m_capacity_mask] = item;
             }
 
             __device__ __forceinline__ void prepend(const T& item)
             {
                 uint32_t allocation = atomicSub((uint32_t *)m_start, 1) - 1;
-
-                if (POWER_OF_TWO)
-                    m_data[allocation & m_capacity] = item;
-                else
-                    m_data[allocation % m_capacity] = item;
+                m_data[allocation & m_capacity_mask] = item;
             }
 
             __device__ void prepend_warp(const T& item)
@@ -228,87 +220,46 @@ namespace groute {
 
                 warp_active_count(first, offset, total);
 
-                if (offset == 0) // the leader thread  
+                if (offset == 0) // The leader thread  
                 {
-                    allocation = atomicSub((uint32_t *)m_start, total) - total; // allocate 'total' items from the start
-                    assert(*m_end - allocation < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
+                    allocation = atomicSub((uint32_t *)m_start, total) - total; // Allocate 'total' items from the start
+                    assert(*m_end - allocation < (m_capacity_mask + 1));
                 }
     
                 allocation = cub::ShuffleIndex(allocation, first);
-                
-                if (POWER_OF_TWO)
-                    m_data[(allocation + offset) & m_capacity] = item;
-                else
-                    m_data[(allocation + offset) % m_capacity] = item;
+                m_data[(allocation + offset) & m_capacity_mask] = item;
             }
                         
             __device__ void prepend_warp(const T& item, int leader, int warp_count, int offset)
             {
                 uint32_t allocation = 0;
 
-                if (cub::LaneId() == leader) // the leader thread  
+                if (cub::LaneId() == leader) // The leader thread  
                 {
-                    allocation = atomicSub((uint32_t *)m_start, warp_count) - warp_count; // allocate 'total' items from the start
-                    assert(*m_end - allocation < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
+                    allocation = atomicSub((uint32_t *)m_start, warp_count) - warp_count; // Allocate 'total' items from the start
+                    assert(*m_end - allocation < (m_capacity_mask + 1));
                 }
     
                 allocation = cub::ShuffleIndex(allocation, leader);
-                
-                if (POWER_OF_TWO)
-                    m_data[(allocation + offset) & m_capacity] = item;
-                else
-                    m_data[(allocation + offset) % m_capacity] = item;
+                m_data[(allocation + offset) & m_capacity_mask] = item;
             }
 
             __device__ __forceinline__ T read(uint32_t i) const
             {
-                if (POWER_OF_TWO)
-                    return m_data[(*m_start + i) & m_capacity];
-                else
-                    return m_data[(*m_start + i) % m_capacity];
+                return m_data[(*m_start + i) & m_capacity_mask];
             }
                         
             __device__ __forceinline__ uint32_t size() const
             {
-                uint32_t start = *m_start;
-                uint32_t end = *m_end;
-
-                if (POWER_OF_TWO)
-                {
-                    start = start & m_capacity;
-                    end = end & m_capacity;
-                    return end >= start ? end - start : ((m_capacity+1) - start + end); // normal and circular cases
-                }
-                else
-                {
-                    start = start % m_capacity;
-                    end = end % m_capacity;
-                    return end >= start ? end - start : (m_capacity - start + end); // normal and circular cases
-                }
+                return *m_end - *m_start;
             }
 
-            __device__ __forceinline__ uint32_t get_alloc_count_and_sync() const
+            __device__ __forceinline__ uint32_t get_pending_count_and_sync() const
             {
-                uint32_t end = *m_end;
-                uint32_t alloc_end = *m_alloc_end;
-
-                uint32_t count;
-
-                if (POWER_OF_TWO)
-                {
-                    end = end & m_capacity;
-                    alloc_end = alloc_end & m_capacity;
-                    count = alloc_end >= end ? alloc_end - end : ((m_capacity+1) - end + alloc_end); // normal and circular cases
-                }
-                else
-                {
-                    end = end % m_capacity;
-                    alloc_end = alloc_end % m_capacity;
-                    count = alloc_end >= end ? alloc_end - end : (m_capacity - end + alloc_end); // normal and circular cases
-                }
+                uint32_t count = *m_pending - *m_end;
                 
-                // sync alloc
-                *m_end = *m_alloc_end;
+                // Sync end with pending
+                *m_end = *m_pending;
                 return count;
             }
 
@@ -317,7 +268,7 @@ namespace groute {
                 return *m_start;
             }
 
-            __device__ __forceinline__ uint32_t get_start_diff(uint32_t prev_start) const
+            __device__ __forceinline__ uint32_t get_start_delta(uint32_t prev_start) const
             {
                 return prev_start - *m_start;
             }
@@ -326,66 +277,107 @@ namespace groute {
 
 
     // 
-    // worklist control kernels:  
+    // Queue control kernels:  
     //
 
-    template<typename T>
-    __global__ void WorklistReset(dev::Worklist<T> worklist)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            worklist.reset();
-    }
+    namespace queue     {
+    namespace kernels   {
 
-    static __global__ void ResetCounters(uint32_t* counters, uint32_t num_counters)
-    {
-        if (TID_1D < num_counters)
-            counters[TID_1D] = 0;
-    }
-
-    template<typename T>
-    __global__ void WorklistAppendItem(dev::Worklist<T> worklist, T item)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            worklist.append(item);
-    }
-
-    template<typename T>
-    __global__ void CircularWorklistReset(dev::CircularWorklist<T> worklist)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            worklist.reset();
-    }
-
-    template<typename T>
-    __global__ void CircularWorklistPopItems(dev::CircularWorklist<T> worklist, uint32_t items)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            worklist.pop_items(items);
-    }
-
-    template<typename T>
-    __global__ void CircularWorklistAppendItem(dev::CircularWorklist<T> worklist, T item)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
+        template<typename T>
+        __global__ void QueueReset(dev::Queue<T> queue)
         {
-            worklist.append(item);
-            worklist.sync_append_alloc();
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+                queue.reset();
+        }
+
+        static __global__ void ResetCounters(uint32_t* counters, uint32_t num_counters)
+        {
+            if (TID_1D < num_counters)
+                counters[TID_1D] = 0;
+        }
+
+        template<typename T>
+        __global__ void QueueAppendItem(dev::Queue<T> queue, T item)
+        {
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+                queue.append(item);
+        }
+
+        template<typename T>
+        __global__ void PCQueueReset(dev::PCQueue<T> pcqueue)
+        {
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+                pcqueue.reset();
+        }
+
+        template<typename T>
+        __global__ void PCQueuePop(dev::PCQueue<T> pcqueue, uint32_t count)
+        {
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+                pcqueue.pop(count);
+        }
+
+        template<typename T>
+        __global__ void PCQueueAppendItem(dev::PCQueue<T> pcqueue, T item)
+        {
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+            {
+                pcqueue.append(item);
+                pcqueue.sync_pending();
+            }
+        }
+
+        template<typename T>
+        __global__ void PCQueueSyncPending(dev::PCQueue<T> pcqueue)
+        {
+            if (threadIdx.x == 0 && blockIdx.x == 0)
+                pcqueue.sync_pending();
         }
     }
-
-    template<typename T>
-    __global__ void CircularWorklistSyncAppendAlloc(dev::CircularWorklist<T> worklist)
-    {
-        if (threadIdx.x == 0 && blockIdx.x == 0)
-            worklist.sync_append_alloc();
     }
 
+    //
+    // Queue memory monitor
+    //
+    class QueueMemoryMonitor
+    {
+        struct Entry
+        {
+            
+        };
+
+        std::string m_app, m_dataset;
+
+        std::atomic<int> m_id_gen;
+
+        QueueMemoryMonitor() : m_id_gen(0) { }
+
+        static QueueMemoryMonitor& Instance()
+        {
+            static QueueMemoryMonitor monitor;
+            return monitor;
+        }
+
+    public:
+        static void Init(const std::string& app, const std::string& dataset)
+        {
+            Instance().m_app = app;
+            Instance().m_dataset = dataset;
+        }
+
+        static int Register()
+        {
+            return Instance().m_id_gen++;
+        }
+    };
+
+
     // 
-    // worklist control classes (host):  
+    // Queue control classes (host):  
     //
 
     template<typename T>
-    class Worklist
+    class Queue
     {
         enum { NUM_COUNTERS = 32 };
 
@@ -402,41 +394,41 @@ namespace groute {
         int32_t m_current_slot;
     
     public:
-        Worklist(uint32_t capacity = 0) : m_data(nullptr), m_mem_owner(true), m_counters(nullptr), m_capacity(capacity), m_current_slot(-1)
+        Queue(uint32_t capacity = 0) : m_data(nullptr), m_mem_owner(true), m_counters(nullptr), m_capacity(capacity), m_current_slot(-1)
         {
             Alloc();
         }
 
-        Worklist(T* mem_buffer, uint32_t mem_size) : m_data(mem_buffer), m_mem_owner(false), m_counters(nullptr), m_capacity(mem_size), m_current_slot(-1)
+        Queue(T* mem_buffer, uint32_t mem_size) : m_data(mem_buffer), m_mem_owner(false), m_counters(nullptr), m_capacity(mem_size), m_current_slot(-1)
         {
             Alloc();
         }
 
-        Worklist(const Worklist& other) = delete;
+        Queue(const Queue& other) = delete;
 
-        Worklist(Worklist&& other)
+        Queue(Queue&& other)
         {
             *this = std::move(other);
         }
 
     private:
-        Worklist& operator=(const Worklist& other) = default;
+        Queue& operator=(const Queue& other) = default;
 
     public:
-        Worklist& operator=(Worklist&& other)
+        Queue& operator=(Queue&& other)
         {
             *this = other;              // First copy all fields  
-            new (&other) Worklist(0);   // Clear up other
+            new (&other) Queue(0);   // Clear up other
 
             return (*this);
         }
 
-        ~Worklist()
+        ~Queue()
         {
             Free();
         }
 
-        typedef dev::Worklist<T> DeviceObjectType;
+        typedef dev::Queue<T> DeviceObjectType;
     
     private:
         void Alloc()
@@ -463,7 +455,7 @@ namespace groute {
         DeviceObjectType DeviceObject() const
         {
             assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);
-            return dev::Worklist<T>(m_data, m_counters + m_current_slot, m_capacity);
+            return dev::Queue<T>(m_data, m_counters + m_current_slot, m_capacity);
         }
 
         void ResetAsync(cudaStream_t stream)
@@ -471,7 +463,7 @@ namespace groute {
             m_current_slot = (m_current_slot + 1) % NUM_COUNTERS;
             if (m_current_slot == 0)
             {
-                ResetCounters <<< 1, NUM_COUNTERS, 0, stream >>>(m_counters, NUM_COUNTERS);
+                queue::kernels::ResetCounters <<< 1, NUM_COUNTERS, 0, stream >>>(m_counters, NUM_COUNTERS);
             }
         }
 
@@ -482,7 +474,7 @@ namespace groute {
 
         void AppendItemAsync(cudaStream_t stream, const T& item) const
         {
-            WorklistAppendItem <<<1, 1, 0, stream >>>(DeviceObject(), item);
+            queue::kernels::QueueAppendItem <<<1, 1, 0, stream >>>(DeviceObject(), item);
         }
 
         T* GetDataPtr() const { return m_data; }
@@ -497,7 +489,7 @@ namespace groute {
             if(*m_host_count > m_capacity)
             {
                 printf(
-                    "\n\nCritical Warning: worklist has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
+                    "\n\nCritical Warning: queue has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
                     (Endpoint::identity_type)0, "", -1, m_capacity, *m_host_count - m_capacity);
                 exit(1);
             }
@@ -507,50 +499,18 @@ namespace groute {
 
         void PrintOffsetsDebug(const Stream& stream) const
         {
-            printf("\nWorklist (Debug): count: %u (capacity: %u)", 
+            printf("\nQueue (Debug): count: %u (capacity: %u)", 
                 GetLength(stream), m_capacity);
         }
 
-        Segment<T> ToSeg(const Stream& stream) const
+        Segment<T> GetSeg(const Stream& stream) const
         {
             return Segment<T>(GetDataPtr(), GetLength(stream));
         }
     };
-
-    class MemoryMonitor
-    {
-        struct Entry
-        {
-            
-        };
-
-        std::string m_app, m_dataset;
-
-        std::atomic<int> m_id_gen;
-
-        MemoryMonitor() : m_id_gen(0) { }
-
-        static MemoryMonitor& Instance()
-        {
-            static MemoryMonitor monitor;
-            return monitor;
-        }
-
-    public:
-        static void Init(const std::string& app, const std::string& dataset)
-        {
-            Instance().m_app = app;
-            Instance().m_dataset = dataset;
-        }
-
-        static int Register()
-        {
-            return Instance().m_id_gen++;
-        }
-    };
     
     template<typename T>
-    class CircularWorklist
+    class PCQueue
     {
         //
         // device buffer / counters 
@@ -559,10 +519,10 @@ namespace groute {
         T* m_data;
         bool m_mem_owner;
 
-        uint32_t *m_start, *m_end, *m_alloc_end;
+        uint32_t *m_start, *m_end, *m_pending;
 
         // Host buffers  
-        uint32_t *m_host_start, *m_host_end, *m_host_alloc_end;
+        uint32_t *m_host_start, *m_host_end, *m_host_pending;
         
         uint32_t m_capacity;
 
@@ -573,10 +533,10 @@ namespace groute {
         const char* m_name;
     
     public:
-        CircularWorklist(uint32_t capacity = 0, Endpoint endpoint = Endpoint(), const char* name = "") : 
+        PCQueue(uint32_t capacity = 0, Endpoint endpoint = Endpoint(), const char* name = "") : 
             m_data(nullptr), m_mem_owner(true), 
-            m_start(nullptr), m_end(nullptr), m_alloc_end(nullptr), 
-            m_host_start(nullptr), m_host_end(nullptr), m_host_alloc_end(nullptr), 
+            m_start(nullptr), m_end(nullptr), m_pending(nullptr), 
+            m_host_start(nullptr), m_host_end(nullptr), m_host_pending(nullptr), 
             m_capacity(capacity == 0 ? 0 : next_power_2(capacity)),
             m_endpoint(endpoint), m_name(name),
             m_instance_id(0), m_max_usage(0)
@@ -584,10 +544,10 @@ namespace groute {
             Alloc();
         }
 
-        CircularWorklist(T *mem_buffer, uint32_t mem_size, Endpoint endpoint = Endpoint(), const char* name = "") : 
+        PCQueue(T *mem_buffer, uint32_t mem_size, Endpoint endpoint = Endpoint(), const char* name = "") : 
             m_data(mem_buffer), m_mem_owner(false), 
-            m_start(nullptr), m_end(nullptr), m_alloc_end(nullptr), 
-            m_host_start(nullptr), m_host_end(nullptr), m_host_alloc_end(nullptr), 
+            m_start(nullptr), m_end(nullptr), m_pending(nullptr), 
+            m_host_start(nullptr), m_host_end(nullptr), m_host_pending(nullptr), 
             m_capacity(mem_size),
             m_endpoint(endpoint), m_name(name),
             m_instance_id(0), m_max_usage(0)
@@ -595,31 +555,31 @@ namespace groute {
             Alloc();
         }
 
-        CircularWorklist(const CircularWorklist& other) = delete;
+        PCQueue(const PCQueue& other) = delete;
 
-        CircularWorklist(CircularWorklist&& other)
+        PCQueue(PCQueue&& other)
         {
             *this = std::move(other);
         }
 
     private:
-        CircularWorklist& operator=(const CircularWorklist& other) = default;
+        PCQueue& operator=(const PCQueue& other) = default;
 
     public:
-        CircularWorklist& operator=(CircularWorklist&& other)
+        PCQueue& operator=(PCQueue&& other)
         {
-            *this = other;                      // First copy all fields 
-            new (&other) CircularWorklist(0);   // Clear up other
+            *this = other;             // First copy all fields 
+            new (&other) PCQueue(0);   // Clear up other
 
             return (*this);
         }
 
-        ~CircularWorklist()
+        ~PCQueue()
         {
             Free();
         }
         
-        typedef dev::CircularWorklist<T> DeviceObjectType;
+        typedef dev::PCQueue<T> DeviceObjectType;
     
     private:
         void Alloc()
@@ -628,18 +588,18 @@ namespace groute {
 
             assert((m_capacity - 1 & m_capacity) == 0);
 
-            m_instance_id = MemoryMonitor::Register();
+            m_instance_id = QueueMemoryMonitor::Register();
     
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaMalloc(&m_data, sizeof(T) * m_capacity));
 
             GROUTE_CUDA_CHECK(cudaMalloc(&m_start, sizeof(uint32_t)));
             GROUTE_CUDA_CHECK(cudaMalloc(&m_end, sizeof(uint32_t)));
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_alloc_end, sizeof(uint32_t)));
+            GROUTE_CUDA_CHECK(cudaMalloc(&m_pending, sizeof(uint32_t)));
 
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_start, sizeof(uint32_t)));
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_end, sizeof(uint32_t)));
-            GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_alloc_end, sizeof(uint32_t)));
+            GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_pending, sizeof(uint32_t)));
         }
     
         void Free()
@@ -654,11 +614,11 @@ namespace groute {
 
             GROUTE_CUDA_CHECK(cudaFree(m_start));
             GROUTE_CUDA_CHECK(cudaFree(m_end));
-            GROUTE_CUDA_CHECK(cudaFree(m_alloc_end));
+            GROUTE_CUDA_CHECK(cudaFree(m_pending));
 
             GROUTE_CUDA_CHECK(cudaFreeHost(m_host_start));
             GROUTE_CUDA_CHECK(cudaFreeHost(m_host_end));
-            GROUTE_CUDA_CHECK(cudaFreeHost(m_host_alloc_end));
+            GROUTE_CUDA_CHECK(cudaFreeHost(m_host_pending));
         }       
 
         void GetRealBounds(uint32_t& start, uint32_t& end, const Stream& stream) const
@@ -676,7 +636,7 @@ namespace groute {
             if (end - start >= m_capacity)
             {
                 printf(
-                    "\n\nCritical Warning: circular worklist has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
+                    "\n\nCritical Warning: PCQueue has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
                     (Endpoint::identity_type)m_endpoint, m_name, m_instance_id, start, end, m_capacity, (end - start) - m_capacity);
                 exit(1);
             }
@@ -694,20 +654,20 @@ namespace groute {
             size = end >= start ? end - start : (m_capacity - start + end); // normal and circular cases
         }
 
-        void GetAllocCount(uint32_t& former_end, uint32_t& alloc_end, uint32_t& count, const Stream& stream) const
+        void GetPendingCount(uint32_t& former_end, uint32_t& pending, uint32_t& count, const Stream& stream) const
         {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_end, m_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
-            GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_alloc_end, m_alloc_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
+            GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_pending, m_pending, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             
             stream.Sync();
 
             former_end = *m_host_end;
-            alloc_end = *m_host_alloc_end;
+            pending = *m_host_pending;
 
             former_end = former_end % m_capacity;
-            alloc_end = alloc_end % m_capacity;
+            pending = pending % m_capacity;
 
-            count = alloc_end >= former_end ? alloc_end - former_end : (m_capacity - former_end + alloc_end); // normal and circular cases
+            count = pending >= former_end ? pending - former_end : (m_capacity - former_end + pending); // normal and circular cases
         }
     
     public:
@@ -732,36 +692,36 @@ namespace groute {
 
         DeviceObjectType DeviceObject() const
         {
-            return dev::CircularWorklist<T>(m_data, m_start, m_end, m_alloc_end, m_capacity);
+            return dev::PCQueue<T>(m_data, m_start, m_end, m_pending, m_capacity);
         }
 
         void ResetAsync(cudaStream_t stream) const
         {
-            CircularWorklistReset<<<1, 1, 0, stream >>>(DeviceObject());
+            queue::kernels::PCQueueReset<<<1, 1, 0, stream >>>(DeviceObject());
         }
 
-        void SyncAppendAllocAsync(cudaStream_t stream) const 
+        void SyncPendingAsync(cudaStream_t stream) const 
         {
-            CircularWorklistSyncAppendAlloc<<<1, 1, 0, stream >>>(DeviceObject());
+            queue::kernels::PCQueueSyncPending<<<1, 1, 0, stream >>>(DeviceObject());
         }
 
         void AppendItemAsync(cudaStream_t stream, const T& item) const
         {
-            CircularWorklistAppendItem <<<1, 1, 0, stream >>>(DeviceObject(), item);
+            queue::kernels::PCQueueAppendItem <<<1, 1, 0, stream >>>(DeviceObject(), item);
         }
 
-        void PopItemsAsync(uint32_t items, cudaStream_t stream) const 
+        void PopAsync(uint32_t count, cudaStream_t stream) const 
+        {
+            if (count == 0) return;
+
+            queue::kernels::PCQueuePop <<<1, 1, 0, stream >>>(DeviceObject(), count);
+        }
+
+        void PopAsync(uint32_t items, const Stream& stream) const 
         {
             if (items == 0) return;
 
-            CircularWorklistPopItems <<<1, 1, 0, stream >>>(DeviceObject(), items);
-        }
-
-        void PopItemsAsync(uint32_t items, const Stream& stream) const 
-        {
-            if (items == 0) return;
-
-            CircularWorklistPopItems <<<1, 1, 0, stream.cuda_stream >>>(DeviceObject(), items);
+            queue::kernels::PCQueuePop <<<1, 1, 0, stream.cuda_stream >>>(DeviceObject(), items);
         }
 
         int GetLength(const Stream& stream) const
@@ -782,41 +742,41 @@ namespace groute {
             return m_capacity - bounds.GetLength();
         }
         
-        int GetAllocCount(const Stream& stream) const
+        int GetPendingCount(const Stream& stream) const
         {
             uint32_t former_end, alloc_end, count;
-            GetAllocCount(former_end, alloc_end, count, stream);
+            GetPendingCount(former_end, alloc_end, count, stream);
 
             return count;
         }
 
-        int GetAllocCountAndSync(const Stream& stream) const
+        int GetPendingCountAndSync(const Stream& stream) const
         {
-            uint32_t count = GetAllocCount(stream);
-            SyncAppendAllocAsync(stream.cuda_stream);
+            uint32_t count = GetPendingCount(stream);
+            SyncPendingAsync(stream.cuda_stream);
             return count;
         }
 
-        void GetOffsetsDebug(uint32_t& capacity, uint32_t& start, uint32_t& end, uint32_t& alloc_end, uint32_t& size, const Stream& stream) const
+        void GetOffsetsDebug(uint32_t& capacity, uint32_t& start, uint32_t& end, uint32_t& pending, uint32_t& size, const Stream& stream) const
         {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_start, m_start, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_end, m_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
-            GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_alloc_end, m_alloc_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
+            GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_pending, m_pending, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             
             stream.Sync();
             capacity = m_capacity;
             start = *m_host_start;
             end = *m_host_end;
-            alloc_end = *m_host_alloc_end;
+            pending = *m_host_pending;
             size = end - start;
         }
 
         void PrintOffsetsDebug(const Stream& stream) const
         {
-            uint32_t capacity, start, end, alloc_end, size;
-            GetOffsetsDebug(capacity, start, end, alloc_end, size, stream);
-            printf("\nCircularWorklist (Debug): start: %u, end: %u, alloc_end: %u, size: %u (capacity: %u)", 
-                start, end, alloc_end, size, capacity);
+            uint32_t capacity, start, end, pending, size;
+            GetOffsetsDebug(capacity, start, end, pending, size, stream);
+            printf("\nPCQueue (Debug): start: %u, end: %u, pending: %u, size: %u (capacity: %u)", 
+                start, end, pending, size, capacity);
         }
 
         std::vector< Segment<T> > GetSegs(Bounds bounds)
@@ -847,7 +807,7 @@ namespace groute {
             return segs;
         }
 
-        std::vector< Segment<T> > ToSegs(const Stream& stream)
+        std::vector< Segment<T> > GetSegs(const Stream& stream)
         {
             return GetSegs(GetBounds(stream));
         }

@@ -76,10 +76,10 @@ namespace groute
 
     template <typename T, typename DWCallbacks, typename TPrio>
     __device__ void SplitDeferredWork(DWCallbacks& callbacks, TPrio priority_threshold,
-                                 dev::CircularWorklist<T>& remote_input,
+                                 dev::PCQueue<T>& remote_input,
                                  uint32_t work_size,
-                                 dev::Worklist<T>& immediate_worklist,
-                                 dev::Worklist<T>& deferred_worklist)
+                                 dev::Queue<T>& immediate_worklist,
+                                 dev::Queue<T>& deferred_worklist)
     {
         // ballot/warp-aggregated
         // Returns number of processed items
@@ -118,10 +118,10 @@ namespace groute
         typename StoppingCondition, typename TLocal, typename TRemote, typename TPrio,
         typename DWCallbacks, typename Work, typename... WorkArgs>
     __global__ void FusedWorkKernel(
-                                  dev::Worklist<TLocal>           immediate_worklist,
-                                  dev::Worklist<TLocal>           deferred_worklist,
-                                  dev::CircularWorklist<TLocal>   remote_input,
-                                  dev::CircularWorklist<TRemote>  remote_output,
+                                  dev::Queue<TLocal>           immediate_worklist,
+                                  dev::Queue<TLocal>           deferred_worklist,
+                                  dev::PCQueue<TLocal>   remote_input,
+                                  dev::PCQueue<TRemote>  remote_output,
                                   int               chunk_size,
                                   TPrio             priority_threshold,
                                   volatile int*     host_current_work_counter,
@@ -165,7 +165,7 @@ namespace groute
                 new_immediate_work += (int)immediate_worklist.len();
                 performed_immediate_work += (int)work_size;
 
-                remote_input.pop_items(work_size);
+                remote_input.pop(work_size);
                 prev_start = remote_input.get_start();
             }
 
@@ -193,7 +193,7 @@ namespace groute
                 // Transmit work
                 if (TID_1D == 0)
                 {
-                    uint32_t remote_work_count = remote_output.get_alloc_count_and_sync();
+                    uint32_t remote_work_count = remote_output.get_pending_count_and_sync();
                     if (remote_work_count > 0) dev::Signal::Increase(remote_work_signal, remote_work_count);
                 }
             }
@@ -201,7 +201,7 @@ namespace groute
             // Count total performed work
             if (TID_1D == 0)
             {
-                new_immediate_work += remote_input.get_start_diff(prev_start);
+                new_immediate_work += remote_input.get_start_delta(prev_start);
                 performed_immediate_work += immediate_worklist.len();
 
                 immediate_worklist.reset();
@@ -221,7 +221,7 @@ namespace groute
     template <
             typename WorkSource, typename TLocal, typename TRemote, 
             typename DWCallbacks, typename Work, typename... WorkArgs>
-    __global__ void WorkKernel(WorkSource work_source, dev::Worklist<TLocal> output_worklist,
+    __global__ void WorkKernel(WorkSource work_source, dev::Queue<TLocal> output_worklist,
                                   DWCallbacks       callbacks,
                                   WorkArgs...       args)
     {

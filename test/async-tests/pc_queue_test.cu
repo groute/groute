@@ -55,7 +55,7 @@ __global__ void ConsumeKernel(const int* work, int work_size, int* sum)
 }
 
 template<bool Prepend = false, bool Warp = true>
-__global__ void ProduceKernel(groute::dev::CircularWorklist<int> worklist, const int* work, int work_size)
+__global__ void ProduceKernel(groute::dev::PCQueue<int> queue, const int* work, int work_size)
 {
     int tid = GTID;
 
@@ -63,18 +63,18 @@ __global__ void ProduceKernel(groute::dev::CircularWorklist<int> worklist, const
     {
         if (Prepend) {
             if (Warp) {
-                worklist.prepend_warp(work[tid]);
+                queue.prepend_warp(work[tid]);
             }
             else {
-                worklist.prepend(work[tid]);
+                queue.prepend(work[tid]);
             }
         }
         else {
             if (Warp) {
-                worklist.append_warp(work[tid]);
+                queue.append_warp(work[tid]);
             }
             else {
-                worklist.append(work[tid]);
+                queue.append(work[tid]);
             }
         }
     }
@@ -84,7 +84,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
 {
     srand(static_cast <unsigned> (22522));
 
-    int worklist_capacity = (nappend + nprepend) / wl_alloc_factor;
+    int queue_capacity = (nappend + nprepend) / wl_alloc_factor;
     int max_chunk_size = std::max((nappend + nprepend) / chunk_size_factor, 1);
 
     CUASSERT_NOERR(cudaSetDevice(0));
@@ -105,7 +105,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
     append_input.H2D();
     prepend_input.H2D();
 
-    groute::CircularWorklist<int> circular_worklist(worklist_capacity);
+    groute::PCQueue<int> pcqueue(queue_capacity);
 
     // sync objects  
     std::mutex mutex;
@@ -114,7 +114,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
     groute::Event signal;
 
     groute::Stream producer_stream(0, groute::SP_Default);
-    circular_worklist.ResetAsync(producer_stream.cuda_stream); // init 
+    pcqueue.ResetAsync(producer_stream.cuda_stream); // init 
 
     producer_stream.Sync(); // sync
 
@@ -136,13 +136,13 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
                 dim3 grid_dims(round_up(chunk, block_dims.x), 1, 1);
 
                 ProduceKernel <true> <<< grid_dims, block_dims, 0, alternating_stream.cuda_stream >>> (
-                    circular_worklist.DeviceObject(), prepend_input.dev_ptr + pos, chunk);
+                    pcqueue.DeviceObject(), prepend_input.dev_ptr + pos, chunk);
 
                 pos += chunk;
             }
 
             // check if worklist has work
-            auto segs = circular_worklist.ToSegs(alternating_stream);
+            auto segs = pcqueue.GetSegs(alternating_stream);
 
             if (segs.empty())
             {
@@ -150,14 +150,14 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
                 {
                     std::unique_lock<std::mutex> guard(mutex);
                     signal.Wait(alternating_stream.cuda_stream);
-                    segs = circular_worklist.ToSegs(alternating_stream);
+                    segs = pcqueue.GetSegs(alternating_stream);
 
                     while (segs.empty())
                     {
                         if (exit) break;
                         cv.wait(guard);
                         signal.Wait(alternating_stream.cuda_stream);
-                        segs = circular_worklist.ToSegs(alternating_stream);
+                        segs = pcqueue.GetSegs(alternating_stream);
                     }
                 }
             }
@@ -172,7 +172,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
                 ConsumeKernel <<< grid_dims, block_dims, 0, alternating_stream.cuda_stream >>> (
                     seg.GetSegmentPtr(), seg.GetSegmentSize(), sum.dev_ptr);
 
-                circular_worklist.PopItemsAsync(seg.GetSegmentSize(), alternating_stream.cuda_stream);
+                pcqueue.PopAsync(seg.GetSegmentSize(), alternating_stream.cuda_stream);
             }
         }
 
@@ -189,9 +189,9 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
         dim3 producer_grid_dims(round_up(chunk, producer_block_dims.x), 1, 1);
 
         ProduceKernel << < producer_grid_dims, producer_block_dims, 0, producer_stream.cuda_stream >> > (
-            circular_worklist.DeviceObject(), append_input.dev_ptr + pos, chunk);
+            pcqueue.DeviceObject(), append_input.dev_ptr + pos, chunk);
 
-        circular_worklist.SyncAppendAllocAsync(producer_stream.cuda_stream);
+        pcqueue.SyncPendingAsync(producer_stream.cuda_stream);
 
         auto ev = groute::Event::Record(producer_stream.cuda_stream);
 
@@ -219,7 +219,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
     ASSERT_EQ(regression_sum, output_sum);
 }
 
-TEST(CircularWorklist, ProducerConsumer)
+TEST(PCQueue, ProducerConsumer)
 {
     TestAppendPrependPop(2048, 0);
     TestAppendPrependPop(2048, 32);

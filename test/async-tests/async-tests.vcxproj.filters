@@ -1,9 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CudaCompile Include="circular_worklist_test.cu" />
-    <CudaCompile Include="worklist_test.cu" />
     <CudaCompile Include="router_test.cu" />
+    <CudaCompile Include="dwl_test.cu" />
+    <CudaCompile Include="pc_queue_test.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

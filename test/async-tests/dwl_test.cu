@@ -253,7 +253,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 }
 
 
-TEST(Worklist, Ring_2)
+TEST(DistributedWorklist, Ring_2)
 {
     TestHistogramWorklist(2, 1024, 4096);
     TestHistogramWorklist(2, 1024, 20000);
@@ -261,7 +261,7 @@ TEST(Worklist, Ring_2)
     TestHistogramWorklist(2, 10000, 200000);
 }
 
-TEST(Worklist, Ring_4)
+TEST(DistributedWorklist, Ring_4)
 {
     TestHistogramWorklist(4, 2048, 4096);
     TestHistogramWorklist(4, 2048, 20000);
@@ -269,7 +269,7 @@ TEST(Worklist, Ring_4)
     TestHistogramWorklist(4, 10000, 200000);
 }
 
-TEST(Worklist, Ring_8)
+TEST(DistributedWorklist, Ring_8)
 {
     TestHistogramWorklist(8, 1024, 4096);
     TestHistogramWorklist(8, 1024, 20000);
@@ -277,7 +277,7 @@ TEST(Worklist, Ring_8)
     TestHistogramWorklist(8, 10000, 200000);
 }
 
-TEST(Worklist, Ring_N)
+TEST(DistributedWorklist, Ring_N)
 {
     TestHistogramWorklist(3, 10000, 20000);
     TestHistogramWorklist(4, 10000, 20000);

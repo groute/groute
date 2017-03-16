@@ -66,7 +66,7 @@ namespace groute
     template<typename TLocal, typename TRemote, typename DWCallbacks>
     __global__ void SplitSendKernel(
         DWCallbacks callbacks, TLocal* work_ptr, uint32_t work_size,
-        dev::CircularWorklist<TLocal> local_work, dev::CircularWorklist<TRemote> remote_work)
+        dev::PCQueue<TLocal> local_work, dev::PCQueue<TRemote> remote_work)
     {
         int tid = TID_1D;
         if (tid < work_size)
@@ -96,8 +96,8 @@ namespace groute
     __global__ void SplitReceiveKernel(
         DWCallbacks callbacks,
         TRemote* work_ptr, uint32_t work_size,
-        dev::CircularWorklist<TLocal> local_work,
-        dev::CircularWorklist<TRemote> remote_work,
+        dev::PCQueue<TLocal> local_work,
+        dev::PCQueue<TRemote> remote_work,
         dev::Counter filter_counter
         )
     {
