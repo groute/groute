@@ -517,7 +517,7 @@ namespace groute {
         DistributedWorklist(
             Context& context, const EndpointList& sources, const EndpointList& workers, const std::map<Endpoint, DWCallbacks>& callbacks, 
             size_t chunk_size, size_t num_buffers, int priority_delta = 0) :
-            m_context(context), m_router(context, Policy::CreateRingPolicy(workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
+            m_context(context), m_router(context, Policy::CreateRingPolicy(sources, workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
             m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
             m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0)
         {

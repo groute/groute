@@ -151,7 +151,7 @@ namespace groute {
             return std::make_shared<Policy>(routing_table, Availability);
         }
 
-        static std::shared_ptr<IPolicy> CreateRingPolicy(const EndpointList& endpoints)
+        static std::shared_ptr<IPolicy> CreateRingPolicy(const EndpointList& sources, const EndpointList& endpoints)
         {
             RoutingTable routing_table;
     
@@ -160,10 +160,13 @@ namespace groute {
                 routing_table[endpoints[i]] = { endpoints[(i + 1) % n] };
             }
     
-            // Instead of pushing to GPU 0, we push tasks to the first available device,
-            // this is beneficial for the case where the first device is already utilized
+            // Instead of pushing from sources to first endpoint, we push tasks to the first available endpoint,
+            // this is beneficial for the case where the first endpoint is already utilized
             // with a prior task.
-            routing_table[Endpoint::HostEndpoint(0)] = endpoints; // For initial work from host
+            for (auto source : sources)
+            {
+                routing_table[source] = endpoints; // For initial work from host
+            }
     
             return std::make_shared<Policy>(routing_table, Availability);
         }
@@ -171,7 +174,7 @@ namespace groute {
         static std::shared_ptr<IPolicy> CreateRingPolicy(int ndevs)
         {
             assert(ndevs > 0);
-            return CreateRingPolicy(Endpoint::Range(ndevs));
+            return CreateRingPolicy({ Endpoint::HostEndpoint(0) }, Endpoint::Range(ndevs));
         }
     };
 }
