@@ -193,7 +193,7 @@ namespace groute
                 // Transmit work
                 if (TID_1D == 0)
                 {
-                    uint32_t remote_work_count = remote_output.get_pending_count_and_sync();
+                    uint32_t remote_work_count = remote_output.commit_pending();
                     if (remote_work_count > 0) dev::Signal::Increase(remote_work_signal, remote_work_count);
                 }
             }

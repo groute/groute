@@ -40,6 +40,7 @@
 #include <new> // need this for the in-memory ctor call in the move assignment operator below  
 
 #include <cub/util_ptx.cuh>
+#include <groute/common.h>
 
 //
 // Common device-related MACROS
@@ -133,7 +134,11 @@ namespace groute {
                 return *m_count;
             }
 
-            // TODO: pop
+            __device__ __forceinline__ void pop(uint32_t count) const
+            {
+                assert(*m_count >= count);
+                *m_count -= count;
+            }
         };
 
         /*
@@ -153,21 +158,16 @@ namespace groute {
                 assert((capacity - 1 & capacity) == 0); // Must be a power of two for handling circular overflow correctly  
             }
 
-            __device__ __forceinline__ void reset()
+            __device__ __forceinline__ void reset() const
             {
                 *m_start = 0; 
                 *m_end = 0;
                 *m_pending = 0;
             }
 
-            __device__ __forceinline__ void pop(uint32_t count)
+            __device__ __forceinline__ void pop(uint32_t count) const
             {
                 (*m_start) += count; 
-            }
-
-            __device__ __forceinline__ void sync_pending()
-            {
-                *m_end = *m_pending;
             }
 
             __device__ __forceinline__ void append(const T& item)
@@ -254,11 +254,12 @@ namespace groute {
                 return *m_end - *m_start;
             }
 
-            __device__ __forceinline__ uint32_t get_pending_count_and_sync() const
+            /// Returns the 'count' of pending items and commits
+            __device__ __forceinline__ uint32_t commit_pending() const
             {
                 uint32_t count = *m_pending - *m_end;
                 
-                // Sync end with pending
+                // Sync end with pending, this makes the pushed items visible to the consumer
                 *m_end = *m_pending;
                 return count;
             }
@@ -323,15 +324,15 @@ namespace groute {
             if (threadIdx.x == 0 && blockIdx.x == 0)
             {
                 pcqueue.append(item);
-                pcqueue.sync_pending();
+                pcqueue.commit_pending();
             }
         }
 
         template<typename T>
-        __global__ void PCQueueSyncPending(dev::PCQueue<T> pcqueue)
+        __global__ void PCQueueCommitPending(dev::PCQueue<T> pcqueue)
         {
             if (threadIdx.x == 0 && blockIdx.x == 0)
-                pcqueue.sync_pending();
+                pcqueue.commit_pending();
         }
     }
     }
@@ -417,7 +418,7 @@ namespace groute {
     public:
         Queue& operator=(Queue&& other)
         {
-            *this = other;              // First copy all fields  
+            *this = other;           // First copy all fields  
             new (&other) Queue(0);   // Clear up other
 
             return (*this);
@@ -467,7 +468,7 @@ namespace groute {
             }
         }
 
-        void ResetAsync(Stream& stream)
+        void ResetAsync(const Stream& stream)
         {
             ResetAsync(stream.cuda_stream);
         }
@@ -497,7 +498,7 @@ namespace groute {
             return *m_host_count;
         }
 
-        void PrintOffsetsDebug(const Stream& stream) const
+        void PrintOffsets(const Stream& stream) const
         {
             printf("\nQueue (Debug): count: %u (capacity: %u)", 
                 GetLength(stream), m_capacity);
@@ -654,20 +655,20 @@ namespace groute {
             size = end >= start ? end - start : (m_capacity - start + end); // normal and circular cases
         }
 
-        void GetPendingCount(uint32_t& former_end, uint32_t& pending, uint32_t& count, const Stream& stream) const
+        void GetPendingCount(uint32_t& end, uint32_t& pending, uint32_t& count, const Stream& stream) const
         {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_end, m_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_pending, m_pending, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             
             stream.Sync();
 
-            former_end = *m_host_end;
+            end = *m_host_end;
             pending = *m_host_pending;
 
-            former_end = former_end % m_capacity;
+            end = end % m_capacity;
             pending = pending % m_capacity;
 
-            count = pending >= former_end ? pending - former_end : (m_capacity - former_end + pending); // normal and circular cases
+            count = pending >= end ? pending - end : (m_capacity - end + pending); // normal and circular cases
         }
     
     public:
@@ -700,9 +701,14 @@ namespace groute {
             queue::kernels::PCQueueReset<<<1, 1, 0, stream >>>(DeviceObject());
         }
 
-        void SyncPendingAsync(cudaStream_t stream) const 
+        void CommitPendingAsync(cudaStream_t stream) const 
         {
-            queue::kernels::PCQueueSyncPending<<<1, 1, 0, stream >>>(DeviceObject());
+            queue::kernels::PCQueueCommitPending<<<1, 1, 0, stream >>>(DeviceObject());
+        }
+
+        void CommitPendingAsync(const Stream& stream) const
+        {
+            CommitPendingAsync(stream.cuda_stream);
         }
 
         void AppendItemAsync(cudaStream_t stream, const T& item) const
@@ -724,7 +730,7 @@ namespace groute {
             queue::kernels::PCQueuePop <<<1, 1, 0, stream.cuda_stream >>>(DeviceObject(), items);
         }
 
-        int GetLength(const Stream& stream) const
+        uint32_t GetLength(const Stream& stream) const
         {
             uint32_t start, end, size;
             GetBounds(start, end, size, stream);
@@ -732,32 +738,25 @@ namespace groute {
             return size;
         }
 
-        int GetSpace(const Stream& stream) const
+        uint32_t GetSpace(const Stream& stream) const
         {
             return m_capacity - GetLength(stream);
         }
 
-        int GetSpace(Bounds bounds) const
+        uint32_t GetSpace(Bounds bounds) const
         {
             return m_capacity - bounds.GetLength();
         }
         
-        int GetPendingCount(const Stream& stream) const
+        uint32_t GetPendingCount(const Stream& stream) const
         {
-            uint32_t former_end, alloc_end, count;
-            GetPendingCount(former_end, alloc_end, count, stream);
+            uint32_t end, pending, count;
+            GetPendingCount(end, pending, count, stream);
 
             return count;
         }
 
-        int GetPendingCountAndSync(const Stream& stream) const
-        {
-            uint32_t count = GetPendingCount(stream);
-            SyncPendingAsync(stream.cuda_stream);
-            return count;
-        }
-
-        void GetOffsetsDebug(uint32_t& capacity, uint32_t& start, uint32_t& end, uint32_t& pending, uint32_t& size, const Stream& stream) const
+        void GetOffsets(uint32_t& capacity, uint32_t& start, uint32_t& end, uint32_t& pending, uint32_t& size, const Stream& stream) const
         {
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_start, m_start, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_end, m_end, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
@@ -771,10 +770,10 @@ namespace groute {
             size = end - start;
         }
 
-        void PrintOffsetsDebug(const Stream& stream) const
+        void PrintOffsets(const Stream& stream) const
         {
             uint32_t capacity, start, end, pending, size;
-            GetOffsetsDebug(capacity, start, end, pending, size, stream);
+            GetOffsets(capacity, start, end, pending, size, stream);
             printf("\nPCQueue (Debug): start: %u, end: %u, pending: %u, size: %u (capacity: %u)", 
                 start, end, pending, size, capacity);
         }

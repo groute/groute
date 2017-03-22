@@ -176,16 +176,14 @@ namespace groute {
 
             if (FLAGS_trace)
             {
-                int take_counter = m_receive_queue.GetPendingCountAndSync(stream);
-                int pass_counter = m_pass_queue.GetPendingCountAndSync(stream);
+                uint32_t take_counter = m_receive_queue.GetPendingCount(stream);
+                uint32_t pass_counter = m_pass_queue.GetPendingCount(stream);
 
                 printf("%d - split-rcv, take: %d, filter: %d, pass: %d\n", (Endpoint::identity_type)m_endpoint, take_counter, filtered_work, pass_counter);
             }
-            else
-            {
-                m_receive_queue.SyncPendingAsync(stream.cuda_stream);
-                m_pass_queue.SyncPendingAsync(stream.cuda_stream);
-            }
+
+            m_receive_queue.CommitPendingAsync(stream);
+            m_pass_queue.CommitPendingAsync(stream);
 
             m_distributed_worklist.ReportWork(
                 0,
@@ -207,7 +205,7 @@ namespace groute {
                 m_receive_queue.DeviceObject(), m_send_queue.DeviceObject()
                 );
 
-            m_send_queue.SyncPendingAsync(stream.cuda_stream);
+            m_send_queue.CommitPendingAsync(stream);
 
             // Split-send does no filtering, no need to update distributed worklist with work
         }
@@ -238,8 +236,8 @@ namespace groute {
                     pops.pop_front();
                 }
 
-                int space = m_pass_queue.GetSpace(bounds);
-                int work = seg.GetSegmentSize(); // Maximum 'pass' output for split-receive is input work size 
+                size_t space = m_pass_queue.GetSpace(bounds);
+                size_t work = seg.GetSegmentSize(); // Maximum 'pass' output for split-receive is input work size 
 
                 while (pop_count + space < work) // Loop over future + Event until we have space (one iteration should usually give space)
                 {

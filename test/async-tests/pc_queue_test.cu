@@ -191,7 +191,7 @@ void TestAppendPrependPop(int nappend, int nprepend, int wl_alloc_factor = 1, in
         ProduceKernel << < producer_grid_dims, producer_block_dims, 0, producer_stream.cuda_stream >> > (
             pcqueue.DeviceObject(), append_input.dev_ptr + pos, chunk);
 
-        pcqueue.SyncPendingAsync(producer_stream.cuda_stream);
+        pcqueue.CommitPendingAsync(producer_stream.cuda_stream);
 
         auto ev = groute::Event::Record(producer_stream.cuda_stream);
 
