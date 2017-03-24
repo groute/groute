@@ -47,7 +47,16 @@ namespace groute {
     enum AllocationFlags
     {
         AF_None = 0,
-        AF_PO2 = 1 << 0, // is allocation required to be in power-of-two size 
+        AF_PO2 = 1 << 0, // Is allocation required to be in power-of-two size 
+    };
+
+    struct Memory
+    {
+        void* ptr;
+        size_t size;
+
+        Memory() : ptr(nullptr), size(0) { }
+        Memory(void* ptr, size_t size) : ptr(ptr), size(size) { }
     };
 
     class MemoryPool
@@ -107,8 +116,21 @@ namespace groute {
         }
 
     private:
-        void Init()
+        void VerifyDev() const
         {
+            int actual_dev;
+            GROUTE_CUDA_CHECK(cudaGetDevice(&actual_dev));
+            if (actual_dev != m_physical_dev)
+            {
+                printf("\n\nWarning: actual dev: %d, expected dev: %d, exiting.\n\n", actual_dev, m_physical_dev);
+                exit(1);
+            }
+        }
+
+        void VerifyInit()
+        {
+            if (m_size > 0) return;
+
             // Expected to be on the correct device context
             VerifyDev();
 
@@ -147,10 +169,30 @@ namespace groute {
             m_offset = 0;
         }
 
-    public:
-        void* Alloc(size_t size)
+        static void Normalize(std::vector<double>& factors)
         {
-            if (m_size == 0) Init(); // lazy init  
+            // Ignore negatives
+            for (auto& f : factors) if (f < 0) f = 0;
+
+            double sum = 0;
+            for (auto f : factors) sum += f;
+            if (sum == 0)
+            {
+                // All zeros, give an equal part to each
+                for (auto& f : factors) f = 1.0 / factors.size();
+                sum = 1.0;
+            }
+
+            // Normalize 
+            for (auto& f : factors) f /= sum;
+        }
+
+    public:
+        void* Alloc(size_t size, size_t align)
+        {
+            VerifyInit(); // Lazy init  
+
+            align = std::max(sizeof(int64_t), align);
 
             if (size > m_size - m_offset)
             {
@@ -162,20 +204,18 @@ namespace groute {
 
             size_t offset = m_offset;
 
-
-            // align to 64 bit also here, just in case
-            //size = (size / sizeof(int64_t)) * sizeof(int64_t);
-            // Align to 512 bytes
-            size = (size / 512) * 512;
+            // Align also here, just in case
+            size = (size / align) * align;
 
             m_offset += size;
             return (void*)((char*)m_mem + offset);
         }
 
-        void* Alloc(double hint, size_t& size, AllocationFlags flags)
+        void* Alloc(double hint, size_t align, size_t& size, AllocationFlags flags)
         {
-            if (m_size == 0) Init(); // lazy init 
+            VerifyInit(); // Lazy init  
 
+            align = std::max(sizeof(int64_t), align);
             size = (size_t)(m_size*hint);
 
             if (flags & AF_PO2)
@@ -184,24 +224,68 @@ namespace groute {
                 size = p2s > size ? p2s >> 1 : p2s;
             }
 
-            // align to 64 bit
-            size = (size / sizeof(int64_t)) * sizeof(int64_t);
+            // Align 
+            size = (size / align) * align;
 
-            return Alloc(size);
+            return Alloc(size, align);
         }
 
-    private:
-        void VerifyDev() const
+        std::vector<Memory> Alloc(double percent, size_t align, const std::vector<double>& po2_factors, const std::vector<double>& non_po2_factors)
         {
-            //#ifndef NDEBUG
-            int actual_dev;
-            GROUTE_CUDA_CHECK(cudaGetDevice(&actual_dev));
-            if (actual_dev != m_physical_dev)
+            VerifyInit(); // Lazy init
+            
+            align = std::max(sizeof(int64_t), align);
+
+            size_t num_po2_allocs = po2_factors.size();
+            size_t num_allocs = num_po2_allocs + non_po2_factors.size();
+
+            // Group factors 
+            std::vector<double> factors;
+            for (const auto& f : po2_factors)     factors.push_back(f);
+            for (const auto& f : non_po2_factors) factors.push_back(f);
+            // And normalize
+            Normalize(factors);
+
+            // Calculate total memory for this Alloc call
+            size_t size = (size_t)(m_size*percent);
+            size = (size / align) * align; // Align 
+            //And allocate
+            char* mem = (char*)Alloc(size, align);
+            size_t offset = 0;
+
+            std::vector<Memory> allocs;
+            allocs.reserve(num_allocs);
+
+            for (size_t i = 0; i < num_po2_allocs; ++i)
             {
-                printf("\n\nWarning: actual dev: %d, expected dev: %d, exiting.\n\n", actual_dev, m_physical_dev);
-                exit(1);
+                size_t s = (size_t)(size*factors[i]);
+                size_t p2s = next_power_2(s);
+                s = p2s > s ? p2s >> 1 : p2s; // Round to prev power-of-two
+
+                allocs.push_back(Memory(mem + offset, s));
+                offset += s;
             }
-            //#endif
+
+            // Remove power-of-two factors
+            factors.erase(factors.begin(), factors.begin() + num_po2_allocs);
+            // And normalize again (this way we use whatever is left after power-of-two rounding's above)
+            Normalize(factors);
+            // Use only the remaining size
+            size_t remaining = size - offset;
+
+            for (const auto& f : factors)
+            {
+                size_t s = (size_t)(remaining*f);
+                s = (s / align) * align; // Align 
+                allocs.push_back(Memory(mem + offset, s));
+                offset += s;
+            }
+
+            //
+            // Currently we only round down power-of-two allocations, 
+            // this can be improved by iterating over possibilities and making a wiser allocation distribution
+            //
+            return allocs;
         }
     };
 

@@ -373,12 +373,12 @@ namespace groute {
             }
         }
 
-        void* Alloc(Endpoint endpoint, size_t size)
+        void* Alloc(Endpoint endpoint, size_t size, size_t align)
         {
-            return m_memory_pools.at(m_endpoint_map.at(endpoint))->Alloc(size);
+            return m_memory_pools.at(m_endpoint_map.at(endpoint))->Alloc(size, align);
         }
 
-        void* Alloc(Endpoint endpoint, double hint, size_t& size, AllocationFlags flags = AF_None)
+        std::vector<Memory> Alloc(Endpoint endpoint, size_t align, const std::vector<double>& po2_factors, const std::vector<double>& non_po2_factors)
         {
             int physical_dev = m_endpoint_map.at(endpoint);
 
@@ -388,7 +388,7 @@ namespace groute {
                 if (p.second == physical_dev) ++endpoints;
             }
 
-            return m_memory_pools.at(physical_dev)->Alloc(hint / endpoints, size, flags);
+            return m_memory_pools.at(physical_dev)->Alloc(1.0 / endpoints, align, po2_factors, non_po2_factors);
         }
         
         // -----------------

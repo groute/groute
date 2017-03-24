@@ -343,22 +343,28 @@ namespace groute {
 
         void AllocateQueues(size_t num_local_queues)
         {
-            void* mem_buffer;
-            size_t mem_size;
+            std::vector<double> po2_factors = {
+                m_distributed_worklist.configuration.alloc_factor_in,
+                m_distributed_worklist.configuration.alloc_factor_out,
+                m_distributed_worklist.configuration.alloc_factor_pass };
 
-            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_in, mem_size, AF_PO2);
-            m_receive_queue = PCQueue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "in");
+            std::vector<double> non_po2_factors;
+            for (size_t i = 0; i < num_local_queues; i++) 
+                non_po2_factors.push_back(m_distributed_worklist.configuration.alloc_factor_local / num_local_queues);
 
-            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_out, mem_size, AF_PO2);
-            m_send_queue = PCQueue<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "out");
+            std::vector<Memory> allocations
+                = m_context.Alloc(m_endpoint, std::max(sizeof(TLocal), sizeof(TRemote)), po2_factors, non_po2_factors);
 
-            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_pass, mem_size, AF_PO2);
-            m_pass_queue = PCQueue<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); 
+            assert(allocations.size() == po2_factors.size() + non_po2_factors.size());
+
+            m_receive_queue = PCQueue<TLocal>((TLocal*)allocations[0].ptr, allocations[0].size / sizeof(TLocal), m_endpoint, "in");
+            m_send_queue = PCQueue<TRemote>((TRemote*)allocations[1].ptr, allocations[1].size / sizeof(TRemote), m_endpoint, "out");
+            m_pass_queue = PCQueue<TRemote>((TRemote*)allocations[2].ptr, allocations[2].size / sizeof(TRemote), m_endpoint, "pass"); 
 
             for (size_t i = 0; i < num_local_queues; i++)
             {
-                mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_local / num_local_queues, mem_size);
-                m_local_queues.push_back(Queue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "local"));
+                m_local_queues.push_back(
+                    Queue<TLocal>((TLocal*)allocations[3 + i].ptr, allocations[3 + i].size / sizeof(TLocal), m_endpoint, "local"));
             }
 
             m_receive_queue.ResetAsync((cudaStream_t)0);
@@ -620,6 +626,7 @@ namespace groute {
             if (context.configuration.verbose) printf("Distributed Worklist starting to run \n");
 
             // Second phase: reserving available memory for local work-queues after links allocation   
+            m_context.ReserveFreeMemoryPercentage(0.9);
             for (Endpoint worker : m_work_endpoints)
             {
                 m_context.SetDevice(worker);
