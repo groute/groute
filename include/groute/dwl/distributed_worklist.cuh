@@ -353,7 +353,7 @@ namespace groute {
             for (size_t i = 0; i < num_local_queues; i++)
             {
                 mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_local / num_local_queues, mem_size);
-                m_local_queues.push_back(Queue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal)));
+                m_local_queues.push_back(Queue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "local"));
             }
 
             m_receive_queue.ResetAsync((cudaStream_t)0);

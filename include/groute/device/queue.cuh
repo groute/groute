@@ -344,14 +344,19 @@ namespace groute {
     {
         struct Entry
         {
-            
+            Endpoint endpoint;
+            const char* name;
+            uint32_t capacity;
+            uint32_t max_usage;
+
+            Entry() : endpoint(), name(nullptr), capacity(0), max_usage(0) { }
+            Entry(Endpoint endpoint, const char* name, uint32_t capacity) : endpoint(endpoint), name(name), capacity(capacity), max_usage(0) { }
         };
 
-        std::string m_app, m_dataset;
+        std::vector<Entry> m_entries;
+        std::atomic<bool> m_exiting;
 
-        std::atomic<int> m_id_gen;
-
-        QueueMemoryMonitor() : m_id_gen(0) { }
+        QueueMemoryMonitor() : m_exiting(false) { }
 
         static QueueMemoryMonitor& Instance()
         {
@@ -359,16 +364,83 @@ namespace groute {
             return monitor;
         }
 
-    public:
-        static void Init(const std::string& app, const std::string& dataset)
+        int RegisterInternal(uint32_t capacity, Endpoint endpoint, const char* name)
         {
-            Instance().m_app = app;
-            Instance().m_dataset = dataset;
+            m_entries.push_back(Entry(endpoint, name, capacity));
+            return m_entries.size() - 1;
         }
 
-        static int Register()
+        void ReportUsageInternal(int index, uint32_t usage)
         {
-            return Instance().m_id_gen++;
+            if (index < 0 || index >= m_entries.size()) return;
+
+            // Keeping the max_usage update not thread-safe.
+            // As long as we dont miss an overflow its ok
+
+            if (usage > m_entries[index].max_usage)
+                m_entries[index].max_usage = usage;
+
+            if (usage > m_entries[index].capacity)
+            {
+                //
+                // We got an overflow, report overall usage stats and exit 
+                //
+
+                bool exiting = m_exiting;
+                if (exiting || !m_exiting.compare_exchange_strong(exiting, true)) return; // avoid printing stats by more than one thread  
+
+                std::map<Endpoint, std::map<std::string, std::vector<Entry>>> grouped_entries;
+                size_t name_max = 0;
+
+                for (const auto& entry : m_entries)
+                {
+                    std::string name(entry.name);
+                    name_max = std::max(name.size(), name_max);
+
+                    grouped_entries[entry.endpoint][name].push_back(entry); // Group by endpoint and order by name
+                }
+                
+                printf("\nQueue has overflowed, dumping overall queue memory statistics: ");
+
+                for (const auto& ep : grouped_entries)
+                {
+                    Endpoint endpoint = ep.first;
+                    printf("\nEndpoint %d: ", (Endpoint::identity_type)endpoint);
+                    for (const auto& np : ep.second)
+                    {
+                        std::string name = np.first;
+                        std::string fill(' ', 10 - name.size());
+
+                        for (size_t i = 0; i < np.second.size(); ++i)
+                        {
+                            const Entry& entry = np.second[i];
+
+                            if(i == 0)  printf("\n\t[name: '%s'%s", name.c_str(), std::string(name_max + 3 - name.size(), ' ').c_str());
+                            else        printf("\n\t[name: '%s(%llu)'%s", name.c_str(), i + 1, std::string(name_max - name.size(), ' ').c_str());
+
+                            printf(", capacity: %10d, usage: %10d, ratio: %.3f", entry.capacity, entry.max_usage, (double)entry.max_usage/entry.capacity);
+
+                            if (entry.max_usage > entry.capacity)   printf(", OVERFLOW: %10d]", entry.max_usage - entry.capacity);
+                            else                                    printf("]");
+                        }
+                    }
+                }
+
+                printf("\n\nUse -wl_alloc_factor_{name} flags to reconfigure memory allocation factors");
+                printf("\nExiting with code %d\n", 16);
+                exit(16);
+            }
+        }
+
+    public:
+        static int Register(uint32_t capacity, Endpoint endpoint, const char* name = "")
+        {
+            return Instance().RegisterInternal(capacity, endpoint, name);
+        }
+
+        static void ReportUsage(int instance_id, uint32_t usage)
+        {
+            Instance().ReportUsageInternal(instance_id, usage);
         }
     };
 
@@ -386,23 +458,27 @@ namespace groute {
         // device buffer / counters 
         //
         T* m_data;
-        bool m_mem_owner;
 
         uint32_t *m_counters;
         uint32_t m_capacity;
         uint32_t *m_host_count;
 
         int32_t m_current_slot;
+
+        bool m_mem_owner;
+        int m_instance_id;
     
     public:
-        Queue(uint32_t capacity = 0) : m_data(nullptr), m_mem_owner(true), m_counters(nullptr), m_capacity(capacity), m_current_slot(-1)
+        Queue(uint32_t capacity = 0, Endpoint endpoint = Endpoint(), const char* name = "") : 
+            m_data(nullptr), m_mem_owner(true), m_counters(nullptr), m_capacity(capacity), m_current_slot(-1), m_instance_id(-1)
         {
-            Alloc();
+            Alloc(endpoint, name);
         }
 
-        Queue(T* mem_buffer, uint32_t mem_size) : m_data(mem_buffer), m_mem_owner(false), m_counters(nullptr), m_capacity(mem_size), m_current_slot(-1)
+        Queue(T* mem_buffer, uint32_t mem_size, Endpoint endpoint = Endpoint(), const char* name = "") : 
+            m_data(mem_buffer), m_mem_owner(false), m_counters(nullptr), m_capacity(mem_size), m_current_slot(-1), m_instance_id(-1)
         {
-            Alloc();
+            Alloc(endpoint, name);
         }
 
         Queue(const Queue& other) = delete;
@@ -432,9 +508,11 @@ namespace groute {
         typedef dev::Queue<T> DeviceObjectType;
     
     private:
-        void Alloc()
+        void Alloc(Endpoint endpoint, const char* name)
         {
             if (m_capacity == 0) return;
+            
+            m_instance_id = QueueMemoryMonitor::Register(m_capacity, endpoint, name);
 
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaMalloc(&m_data, sizeof(T) * m_capacity));
@@ -486,14 +564,8 @@ namespace groute {
 
             GROUTE_CUDA_CHECK(cudaMemcpyAsync(m_host_count, m_counters + m_current_slot, sizeof(uint32_t), cudaMemcpyDeviceToHost, stream.cuda_stream));
             stream.Sync();
-    
-            if(*m_host_count > m_capacity)
-            {
-                printf(
-                    "\n\nCritical Warning: queue has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t capacity: %d, overflow: %d] \nExiting \n\n", 
-                    (Endpoint::identity_type)0, "", -1, m_capacity, *m_host_count - m_capacity);
-                exit(1);
-            }
+            
+            QueueMemoryMonitor::ReportUsage(m_instance_id, *m_host_count);
 
             return *m_host_count;
         }
@@ -516,22 +588,16 @@ namespace groute {
         //
         // device buffer / counters 
         //
-        
         T* m_data;
-        bool m_mem_owner;
-
         uint32_t *m_start, *m_end, *m_pending;
 
         // Host buffers  
         uint32_t *m_host_start, *m_host_end, *m_host_pending;
         
         uint32_t m_capacity;
-
+        
+        bool m_mem_owner;
         int m_instance_id;
-        mutable uint32_t m_max_usage;
-
-        Endpoint m_endpoint;
-        const char* m_name;
     
     public:
         PCQueue(uint32_t capacity = 0, Endpoint endpoint = Endpoint(), const char* name = "") : 
@@ -539,10 +605,9 @@ namespace groute {
             m_start(nullptr), m_end(nullptr), m_pending(nullptr), 
             m_host_start(nullptr), m_host_end(nullptr), m_host_pending(nullptr), 
             m_capacity(capacity == 0 ? 0 : next_power_2(capacity)),
-            m_endpoint(endpoint), m_name(name),
-            m_instance_id(0), m_max_usage(0)
+            m_instance_id(-1)
         {
-            Alloc();
+            Alloc(endpoint, name);
         }
 
         PCQueue(T *mem_buffer, uint32_t mem_size, Endpoint endpoint = Endpoint(), const char* name = "") : 
@@ -550,10 +615,9 @@ namespace groute {
             m_start(nullptr), m_end(nullptr), m_pending(nullptr), 
             m_host_start(nullptr), m_host_end(nullptr), m_host_pending(nullptr), 
             m_capacity(mem_size),
-            m_endpoint(endpoint), m_name(name),
-            m_instance_id(0), m_max_usage(0)
+            m_instance_id(-1)
         {
-            Alloc();
+            Alloc(endpoint, name);
         }
 
         PCQueue(const PCQueue& other) = delete;
@@ -583,13 +647,13 @@ namespace groute {
         typedef dev::PCQueue<T> DeviceObjectType;
     
     private:
-        void Alloc()
+        void Alloc(Endpoint endpoint, const char* name)
         {
             if (m_capacity == 0) return;
 
-            assert((m_capacity - 1 & m_capacity) == 0);
+            if ((m_capacity - 1 & m_capacity) != 0) throw groute::exception("PCQueue must have power-of-two capacity");
 
-            m_instance_id = QueueMemoryMonitor::Register();
+            m_instance_id = QueueMemoryMonitor::Register(m_capacity, endpoint, name);
     
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaMalloc(&m_data, sizeof(T) * m_capacity));
@@ -606,9 +670,6 @@ namespace groute {
         void Free()
         {
             if (m_capacity == 0) return;
-
-            //printf("\nCircular worklist usage stats (instance id: %d, capacity: %d, max_usage: %d)\n", 
-            //        m_instance_id, m_capacity, m_max_usage);
 
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaFree(m_data));
@@ -632,17 +693,7 @@ namespace groute {
             start = *m_host_start;
             end = *m_host_end;
 
-            assert(end - start < m_capacity);
-
-            if (end - start >= m_capacity)
-            {
-                printf(
-                    "\n\nCritical Warning: PCQueue has overflowed, please allocate more memory \n\t[endpoint: %d, name: %s, instance id: %d, \n\t start: %d, end: %d, capacity: %d, overflow: %d] \nExiting \n\n", 
-                    (Endpoint::identity_type)m_endpoint, m_name, m_instance_id, start, end, m_capacity, (end - start) - m_capacity);
-                exit(1);
-            }
-
-            m_max_usage = std::max(m_max_usage, end - start);
+            QueueMemoryMonitor::ReportUsage(m_instance_id, end - start);
         }
         
         void GetBounds(uint32_t& start, uint32_t& end, uint32_t& size, const Stream& stream) const
