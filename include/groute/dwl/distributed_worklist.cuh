@@ -37,8 +37,6 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
-#include <gflags/gflags_declare.h>
-
 #include <groute/groute.h>
 
 #include <groute/device/queue.cuh>
@@ -46,20 +44,26 @@
 
 #include <groute/dwl/split_kernels.cuh>
 
-DECLARE_bool(verbose);
-DECLARE_bool(trace);
-DECLARE_bool(count_work);
-
-DECLARE_double(wl_alloc_factor_local);
-DECLARE_double(wl_alloc_factor_in);
-DECLARE_double(wl_alloc_factor_out);
-DECLARE_double(wl_alloc_factor_pass);
-
 namespace groute {
+
+    struct DistributedWorklistConfiguration
+    {
+        bool count_work;
+        double 
+            alloc_factor_in, alloc_factor_out, 
+            alloc_factor_pass, alloc_factor_local;
+        int fused_chunk_size;
+
+        DistributedWorklistConfiguration() : // Default configuration  
+            count_work(false), 
+            alloc_factor_in(0.4), alloc_factor_out(0.2), alloc_factor_pass(0.2), alloc_factor_local(0.2), fused_chunk_size(std::numeric_limits<int>::max())
+        { }
+    };
 
     template<typename TLocal, typename TRemote>
     struct IDistributedWorklist
     {
+        IDistributedWorklist(DistributedWorklistConfiguration configuration = DistributedWorklistConfiguration()) : configuration(configuration) { }
         virtual ~IDistributedWorklist() { }
 
         virtual void ReportInitialWork(int initial_work, Endpoint endpoint, const char* caller = "") = 0;
@@ -72,7 +76,8 @@ namespace groute {
         
         virtual Link<TRemote>& GetLink(Endpoint source) = 0;
 
-        std::mutex log_gate;
+        DistributedWorklistConfiguration configuration;
+        std::mutex log_gate; // Using this may effect performance  
     };
 
     template<typename TLocal, typename TRemote, typename DWCallbacks>
@@ -174,7 +179,7 @@ namespace groute {
 
             int filtered_work = (int)m_filter_counter.GetCount(stream);
 
-            if (FLAGS_trace)
+            if (m_context.configuration.trace)
             {
                 uint32_t take_counter = m_receive_queue.GetPendingCount(stream);
                 uint32_t pass_counter = m_pass_queue.GetPendingCount(stream);
@@ -341,18 +346,18 @@ namespace groute {
             void* mem_buffer;
             size_t mem_size;
 
-            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_in, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_in, mem_size, AF_PO2);
             m_receive_queue = PCQueue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "in");
 
-            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_out, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_out, mem_size, AF_PO2);
             m_send_queue = PCQueue<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "out");
 
-            mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_pass, mem_size, AF_PO2);
+            mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_pass, mem_size, AF_PO2);
             m_pass_queue = PCQueue<TRemote>((TRemote*)mem_buffer, mem_size / sizeof(TRemote), m_endpoint, "pass"); 
 
             for (size_t i = 0; i < num_local_queues; i++)
             {
-                mem_buffer = m_context.Alloc(m_endpoint, FLAGS_wl_alloc_factor_local / num_local_queues, mem_size);
+                mem_buffer = m_context.Alloc(m_endpoint, m_distributed_worklist.configuration.alloc_factor_local / num_local_queues, mem_size);
                 m_local_queues.push_back(Queue<TLocal>((TLocal*)mem_buffer, mem_size / sizeof(TLocal), m_endpoint, "local"));
             }
 
@@ -572,7 +577,8 @@ namespace groute {
 
         DistributedWorklist(
             Context& context, const EndpointList& sources, const EndpointList& workers, const std::map<Endpoint, DWCallbacks>& callbacks, 
-            size_t chunk_size, size_t num_buffers, int priority_delta = 0) :
+            size_t chunk_size, size_t num_buffers, int priority_delta = 0, DistributedWorklistConfiguration configuration = DistributedWorklistConfiguration()) :
+            IDistributedWorklist<TLocal, TRemote>(configuration),
             m_context(context), m_router(context, Policy::CreateRingPolicy(sources, workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
             m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
             m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0),
@@ -580,7 +586,7 @@ namespace groute {
         {
             if (workers.size() != callbacks.size()) throw groute::exception("DWL parameter mismatch (workers <-> callbacks)");
 
-            if (FLAGS_verbose)
+            if (context.configuration.verbose)
             {
                 printf(
                     "\nDistributed Worklist configuration: \n\tchunk: %llu, buffers: %llu, priority delta: %d, initial threshold: %d\n", 
@@ -611,7 +617,7 @@ namespace groute {
                 m_workers[worker] = groute::make_unique< WorkerType >(m_context, worker);
             }
 
-            if (FLAGS_verbose) printf("Distributed Worklist starting to run \n");
+            if (context.configuration.verbose) printf("Distributed Worklist starting to run \n");
 
             // Second phase: reserving available memory for local work-queues after links allocation   
             for (Endpoint worker : m_work_endpoints)
@@ -627,7 +633,7 @@ namespace groute {
 
         virtual ~DistributedWorklist()
         {
-            if (FLAGS_count_work && FLAGS_verbose)
+            if (this->configuration.count_work && m_context.configuration.verbose)
             {
                 printf("Work performed by each GPU:\n");
                 for (auto& p : m_endpoint_work)
@@ -686,7 +692,7 @@ namespace groute {
 
             int work = new_work - performed_work;
 
-            if (FLAGS_count_work)
+            if (this->configuration.count_work)
             {
                 uint32_t w = (new_work < 0 ? -new_work : 0) + (performed_work > 0 ? performed_work : 0);
                 m_total_work += w;
@@ -706,7 +712,7 @@ namespace groute {
             {
                 if (m_deferred_work_counter == 0)
                 {
-                    if (FLAGS_verbose) printf("Distributed Worklist shutting down successfully (%s)\n", caller);
+                    if (m_context.configuration.verbose) printf("Distributed Worklist shutting down successfully (%s)\n", caller);
 
                     ExitWatchdog();
                     m_router.Shutdown();
@@ -732,7 +738,7 @@ namespace groute {
 
             int work = new_work - performed_work;
 
-            if (FLAGS_count_work)
+            if (this->configuration.count_work)
             {
                 uint32_t w = (new_work < 0 ? -new_work : 0) + (performed_work > 0 ? performed_work : 0);
                 m_total_work += w;

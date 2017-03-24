@@ -40,11 +40,7 @@
 #include <groute/context.h>
 #include <groute/dwl/work_kernels.cuh>
 
-#include <gflags/gflags.h>
 #include <utils/markers.h>
-
-DECLARE_bool(trace);
-DEFINE_int32(fused_chunk_size, INT_MAX, "Intermediate peer transfer");
 
 namespace groute {
 
@@ -123,6 +119,7 @@ namespace groute {
         static const char* WorkerName() { return "FusedWorker"; }
         static const char* KernelName() { return "FusedWorkKernel"; }
 
+        Context& m_context;
         Endpoint m_endpoint;
         
         dim3 m_grid_dims, m_block_dims;
@@ -147,7 +144,7 @@ namespace groute {
         }
 
     public:
-        FusedWorker(Context& context, Endpoint endpoint) : m_endpoint(endpoint)
+        FusedWorker(Context& context, Endpoint endpoint) : m_context(context), m_endpoint(endpoint)
         {
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_work_counters[IMMEDIATE_COUNTER], sizeof(int)));
             GROUTE_CUDA_CHECK(cudaMallocHost(&m_work_counters[DEFERRED_COUNTER], sizeof(int)));
@@ -171,7 +168,7 @@ namespace groute {
             size_t fused_work_blocks 
                 = (props.multiProcessorCount - 1) * occupancy_per_MP; // -1 for split-receive  
 
-            if (FLAGS_trace)
+            if (context.configuration.trace)
             {
                 printf(
                     "%d - fused kernel, multi processor count: %d, occupancy: %d, blocks: %llu [(mp-1)*occupancy]\n", 
@@ -188,7 +185,7 @@ namespace groute {
 
         ~FusedWorker()
         {
-            if (FLAGS_verbose)
+            if (m_context.configuration.verbose)
             {
                 for (size_t i = 0; i < m_work_counts.size(); i++)
                 {
@@ -224,7 +221,7 @@ namespace groute {
             {
                 int priority_threshold = distributed_worklist.GetPriorityThreshold();
 
-                if (FLAGS_trace)
+                if (m_context.configuration.trace)
                 {
                     uint32_t immediate_in = immediate_worklist->GetLength(stream);
                     uint32_t deferred_in = deferred_worklist->GetLength(stream);
@@ -236,7 +233,7 @@ namespace groute {
                         (Endpoint::identity_type)m_endpoint, priority_threshold, immediate_in, deferred_in, remote_in, remote_out);
                 }
 
-                if (FLAGS_count_work)
+                if (distributed_worklist.configuration.count_work)
                 {
                     Marker::MarkWorkitems(distributed_worklist.GetCurrentWorkCount(m_endpoint), KernelName());
                 }
@@ -247,7 +244,7 @@ namespace groute {
 
                     immediate_worklist->DeviceObject(), deferred_worklist->DeviceObject(),
                     remote_input->DeviceObject(), remote_output->DeviceObject(),
-                    FLAGS_fused_chunk_size, priority_threshold,
+                    distributed_worklist.configuration.fused_chunk_size, priority_threshold,
                     immediate_work_counter, deferred_work_counter,
                     m_device_counter, m_work_signal.DevicePtr(),
                     m_barrier_lifetime,                       
@@ -276,21 +273,21 @@ namespace groute {
                 distributed_worklist.ReportDeferredWork(*m_work_counters[DEFERRED_COUNTER], 0, m_endpoint);
                 distributed_worklist.ReportWork(*m_work_counters[IMMEDIATE_COUNTER], 0, m_endpoint);
 
-                if (FLAGS_trace)
+                if (m_context.configuration.trace)
                 {
                     printf(
                         "%d - done kernel, LWC: %d, HWC: %d\n", 
                         (Endpoint::identity_type)m_endpoint, *m_work_counters[DEFERRED_COUNTER], *m_work_counters[IMMEDIATE_COUNTER]);
                 }
 
-                if (FLAGS_count_work)
+                if (distributed_worklist.configuration.count_work)
                 {
                     m_work_counts.push_back((int)(*m_work_counters[DEFERRED_COUNTER]) + (int)(*m_work_counters[IMMEDIATE_COUNTER]));
                 }
 
                 auto segs = peer->WaitForInputWork(stream, priority_threshold);
 
-                if (FLAGS_trace)
+                if (m_context.configuration.trace)
                 {
                     int segs_size = 0;
                     for (auto& seg : segs)

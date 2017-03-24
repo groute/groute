@@ -38,12 +38,8 @@
 
 #include <cuda_runtime.h>
 
-#include <gflags/gflags_declare.h>
 #include <groute/context.h>
 #include <groute/graphs/common.h>
-
-DECLARE_bool(verbose);
-DECLARE_bool(pn);
 
 
 namespace groute {
@@ -644,10 +640,10 @@ namespace graphs {
             std::vector<dev::CSRGraphSeg> m_dev_segs;
 
         public:
-            CSRGraphAllocator(groute::Context& context, host::CSRGraph& host_graph, int ngpus) :
+            CSRGraphAllocator(groute::Context& context, host::CSRGraph& host_graph, int ngpus, bool metis_pn) :
                 m_context(context), m_ngpus(ngpus)
             {
-                m_partitioner = FLAGS_pn && (m_ngpus > 1)
+                m_partitioner = metis_pn && (m_ngpus > 1)
                     ? (std::unique_ptr<GraphPartitioner>) std::unique_ptr<MetisPartitioner>(new MetisPartitioner(host_graph, ngpus))
                     : (std::unique_ptr<GraphPartitioner>) std::unique_ptr<RandomPartitioner>(new RandomPartitioner(host_graph, ngpus));
 
@@ -903,12 +899,10 @@ namespace graphs {
                 std::vector<index_t> halos_vec 
                     = GetUniqueHalos(m_host_graph->edge_dst, seg_snode, seg_nnodes, seg_sedge, seg_nedges, halos_counter);
                 
-                if (FLAGS_verbose)
-                {
-                    printf(
-                        "Halo stats -> seg: %d, seg nodes: %d, seg edges: %d, halos: %d, unique halos: %llu\n", 
-                        seg_idx, seg_nnodes, seg_nedges, halos_counter, halos_vec.size());
-                }
+                //printf(
+                //    "Halo stats -> seg: %d, seg nodes: %d, seg edges: %d, halos: %d, unique halos: %llu\n", 
+                //    seg_idx, seg_nnodes, seg_nedges, halos_counter, halos_vec.size());
+
 
                 if (halos_vec.size() == 0)
                 {

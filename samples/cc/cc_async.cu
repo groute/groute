@@ -75,7 +75,7 @@ DEFINE_bool(inverse_topology, false, "Inverse the top down topology (problem con
 
 bool RunCCMAsyncAtomic(int ngpus)
 {
-    cc::Context context(FLAGS_graphfile, FLAGS_ggr, FLAGS_verbose, ngpus);
+    cc::Context context(FLAGS_graphfile, ngpus);
 
     cc::Configuration configuration;
     if (FLAGS_auto_config)

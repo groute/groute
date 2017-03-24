@@ -53,6 +53,13 @@
 
 namespace groute {
 
+    struct ContextConfiguration
+    {
+        bool verbose, trace;
+
+        ContextConfiguration() : verbose(true), trace(false) { }
+    };
+
     /*
     * @brief The global groute context 
     */
@@ -113,6 +120,8 @@ namespace groute {
         }
 
     public:
+        ContextConfiguration configuration;
+
         Context() : m_fragment_size(-1)
         {
             int actual_ngpus;
@@ -180,7 +189,12 @@ namespace groute {
 
         ~Context()
         {
-            printf("\nContext status:"); PrintStatus(); printf("\n");
+            if (configuration.verbose)
+            {
+                printf("\nContext status:"); 
+                PrintStatus(); 
+                printf("\n");
+            }
         }
 
         void RequireMemcpyLane(Endpoint src, Endpoint dst)

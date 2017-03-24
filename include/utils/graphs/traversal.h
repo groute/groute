@@ -37,8 +37,6 @@
 #include <cassert>
 #include <sstream>
 
-#include <gflags/gflags.h>
-
 #include <groute/event_pool.h>
 #include <groute/graphs/csr_graph.h>
 #include <groute/dwl/distributed_worklist.cuh>
@@ -48,10 +46,12 @@
 #include <utils/stopwatch.h>
 #include <utils/markers.h>
 
+#include <gflags/gflags.h>
 
 DECLARE_string(graphfile);
 DECLARE_bool(ggr);
 DECLARE_bool(verbose);
+DECLARE_bool(trace);
 DECLARE_int32(repetitions);
 DECLARE_bool(gen_graph);
 DECLARE_int32(gen_nnodes);
@@ -69,12 +69,14 @@ DECLARE_int32(fragment_size);
 DECLARE_int32(cached_events);
 DECLARE_int32(block_size);
 DECLARE_bool(iteration_fusion);
+DECLARE_int32(fused_chunk_size);
 DECLARE_int32(prio_delta);
 DECLARE_bool(count_work);
 DECLARE_bool(stats);
-DECLARE_bool(warp_append);
-DECLARE_bool(debug_print);
-DECLARE_bool(high_priority_receive);
+DECLARE_double(wl_alloc_factor_local);
+DECLARE_double(wl_alloc_factor_in);
+DECLARE_double(wl_alloc_factor_out);
+DECLARE_double(wl_alloc_factor_pass);
 
 DECLARE_bool(cta_np);
 
@@ -220,13 +222,16 @@ namespace utils {
             {
                 Context<Algo> context(ngpus);
 
+                context.configuration.verbose = FLAGS_verbose;
+                context.configuration.trace = FLAGS_trace;
+
                 context.CacheEvents(FLAGS_cached_events);
                 if (FLAGS_fragment_size > 0) {
                     context.EnableFragmentation(FLAGS_fragment_size);
                 }
 
                 groute::graphs::multi::CSRGraphAllocator
-                    dev_graph_allocator(context, context.host_graph, ngpus);
+                    dev_graph_allocator(context, context.host_graph, ngpus, FLAGS_pn);
 
                 dev_graph_allocator.AllocateDatumObjects(args...);
 
@@ -245,8 +250,16 @@ namespace utils {
                     callbacks[worker_endpoints[i]] = DWCallbacks(dev_graph_allocator.GetDeviceObjects()[i], args.GetDeviceObjects()[i]...);
                 }
 
+                groute::DistributedWorklistConfiguration configuration;
+                configuration.fused_chunk_size      = FLAGS_fused_chunk_size;
+                configuration.count_work            = FLAGS_count_work;
+                configuration.alloc_factor_in       = FLAGS_wl_alloc_factor_in;
+                configuration.alloc_factor_out      = FLAGS_wl_alloc_factor_out;
+                configuration.alloc_factor_pass     = FLAGS_wl_alloc_factor_pass;
+                configuration.alloc_factor_local    = FLAGS_wl_alloc_factor_local;
+
                 groute::DistributedWorklist<TLocal, TRemote, DWCallbacks, TWorker> 
-                    distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta);
+                    distributed_worklist(context, { host }, worker_endpoints, callbacks, max_exch_size, num_exch_buffs, prio_delta, configuration);
                 
                 context.SyncAllDevices(); // Allocations are on default streams, syncing all devices 
 

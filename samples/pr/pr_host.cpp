@@ -35,6 +35,7 @@
 DEFINE_int32(top_ranks, 10, "The number of top ranks to compare for PR regression");
 DEFINE_bool(print_ranks, false, "Write out ranks to output");
 DEFINE_bool(norm, false, "Normalize PR output ranks (L1)");
+DECLARE_bool(verbose);
 
 
 std::vector<rank_t> PageRankHost(groute::graphs::host::CSRGraph& graph)

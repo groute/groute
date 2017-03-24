@@ -71,9 +71,11 @@ namespace cc
         int ngpus;
         unsigned int nvtxs, nedges;
         
-        Context(std::string &graphfile, bool ggr, bool verbose, int ngpus) : 
+        Context(std::string &graphfile, int ngpus) : 
             groute::Context(ngpus), ngpus(ngpus)
         {
+            this->configuration.verbose = FLAGS_verbose;
+
             graph_t *graph;
 
             if (graphfile == "") {
@@ -81,8 +83,8 @@ namespace cc
                 exit(0);
             }
 
-            printf("\nLoading graph %s (%d)\n", graphfile.substr(graphfile.find_last_of('\\') + 1).c_str(), ggr);
-            graph = GetCachedGraph(graphfile, ggr);
+            printf("\nLoading graph %s (%d)\n", graphfile.substr(graphfile.find_last_of('\\') + 1).c_str(), FLAGS_ggr);
+            graph = GetCachedGraph(graphfile, FLAGS_ggr);
 
             if (graph->nvtxs == 0) {
                 printf("Empty graph, exiting\n");
@@ -94,7 +96,7 @@ namespace cc
 
             printf("\n----- Running CC Async -----\n\n");
 
-            if (verbose) {
+            if (this->configuration.verbose) {
                 printf("The graph has %d vertices, and %d edges (average degree: %f)\n", nvtxs, nedges, (float)nedges / nvtxs);
             }
         }

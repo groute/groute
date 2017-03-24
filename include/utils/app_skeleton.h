@@ -84,12 +84,10 @@ DEFINE_int32(fragment_size, -1, "Fragment size for all memcpy operations");
 DEFINE_int32(cached_events, 8, "Number of events to cache in each event pool (per device)");
 DEFINE_int32(block_size, 256, "Block size for traversal kernels");
 DEFINE_bool(iteration_fusion, true, "Fuse multiple iterations (FusedWork kernel performs one iteration each launch if this is false)");
+DEFINE_int32(fused_chunk_size, INT32_MAX, "Size of chunk to work on within fused kernel");
 DEFINE_int32(prio_delta, 10, "The soft priority delta");
 DEFINE_bool(count_work, false, "Count the work-items performed by each individual GPU");
 DEFINE_bool(stats, false, "Print graph statistics and exit");
-DEFINE_bool(warp_append, true, "Use warp aggregated operations for worklist append's");
-DEFINE_bool(debug_print, false, "Print detailed debug info");
-DEFINE_bool(high_priority_receive, true, "Use a high priority stream for split receive");
 
 DEFINE_bool(cta_np, true, "Use nested parallelism withing traversal kernels");
 
