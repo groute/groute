@@ -225,10 +225,6 @@ namespace utils {
                     context.EnableFragmentation(FLAGS_fragment_size);
                 }
 
-                if (FLAGS_verbose) {
-                    printf("\nContext status (before):"); context.PrintStatus(); printf("\n");
-                }
-
                 groute::graphs::multi::CSRGraphAllocator
                     dev_graph_allocator(context, context.host_graph, ngpus);
 
@@ -310,10 +306,6 @@ namespace utils {
                 {
                     // Join workers  
                     workers[i].join();
-                }
-
-                if (FLAGS_verbose) {
-                    printf("\nContext status (after):"); context.PrintStatus(); printf("\n");
                 }
 
                 // Gather

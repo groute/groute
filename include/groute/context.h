@@ -178,6 +178,11 @@ namespace groute {
             InitMemoryPools();
         }
 
+        ~Context()
+        {
+            printf("\nContext status:"); PrintStatus(); printf("\n");
+        }
+
         void RequireMemcpyLane(Endpoint src, Endpoint dst)
         {
             assert(m_endpoint_map.find(src) != m_endpoint_map.end());

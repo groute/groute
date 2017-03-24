@@ -509,7 +509,65 @@ namespace groute {
         std::atomic<uint32_t> m_total_work;
         std::map<Endpoint, std::atomic<uint32_t>> m_endpoint_work;
 
-        // TODO: std::thread m_watchdog; 
+        volatile bool m_started, m_shotdown;
+        volatile int m_report_time; // Last report time (seconds from start)
+        
+        std::chrono::high_resolution_clock::time_point m_start_time;
+        std::thread m_watchdog; 
+        std::mutex m_watchdog_mutex;
+        std::condition_variable m_watchdog_cv;
+
+        void RunWatchdog()
+        {
+            const int max_seconds = 5; // Max seconds allowed with no report activity  
+
+            while (!m_shotdown)
+            {
+                { // Lock block
+                    std::unique_lock<std::mutex> guard(m_watchdog_mutex);
+
+                    m_watchdog_cv.wait_for(
+                        guard, std::chrono::seconds(max_seconds/2), [this]() { return m_shotdown; });
+                }
+                    
+                if (!m_started) continue;
+                if (m_shotdown) break;
+
+                auto report = m_report_time;
+                auto current 
+                    = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::high_resolution_clock::now() - m_start_time).count();
+
+                if (current - report > max_seconds)
+                {
+                    //
+                    // We encountered a possible deadlock, report and exit
+                    //
+
+                    printf("\nDistributed Worklist seems to be deadlocked. This is usually do to insufficient memory allocated for 'pass' queues");
+                    printf("\nExiting with code %d\n", 15);
+                    exit(15);
+                }
+            }
+        }
+
+        void ExitWatchdog()
+        {
+            if (!m_shotdown)
+            {
+                m_shotdown = true;
+                std::lock_guard<std::mutex> guard(m_watchdog_mutex);
+                m_watchdog_cv.notify_one();
+            }
+        }
+
+        void MarkReportTime()
+        {
+            m_report_time 
+                = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::high_resolution_clock::now() - m_start_time).count();
+        }
+
     public:
 
         DistributedWorklist(
@@ -517,7 +575,8 @@ namespace groute {
             size_t chunk_size, size_t num_buffers, int priority_delta = 0) :
             m_context(context), m_router(context, Policy::CreateRingPolicy(sources, workers), (int)(sources.size() + workers.size()), (int)workers.size()), 
             m_source_endpoints(sources), m_work_endpoints(workers), m_current_work_counter(0), m_deferred_work_counter(0), m_priority_delta(WorkerType::soft_prio ? priority_delta : 0), 
-            m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0)
+            m_current_threshold(priority_delta == 0 || WorkerType::soft_prio == false ? INT32_MAX : priority_delta), m_total_work(0),
+            m_started(false), m_shotdown(false)
         {
             if (workers.size() != callbacks.size()) throw groute::exception("DWL parameter mismatch (workers <-> callbacks)");
 
@@ -561,6 +620,9 @@ namespace groute {
                 m_peers[worker]->AllocateQueues(WorkerType::num_local_queues);
                 m_peers[worker]->Run();
             }
+
+            m_start_time = std::chrono::high_resolution_clock::now();
+            m_watchdog = std::thread([this]() { RunWatchdog(); });
         }
 
         virtual ~DistributedWorklist()
@@ -573,6 +635,9 @@ namespace groute {
                 int repwork = m_total_work;
                 printf("Total work-items: %d\n", repwork);
             }
+
+            ExitWatchdog();
+            m_watchdog.join();
         }
 
         Link<TRemote>& GetLink(Endpoint source) override
@@ -606,6 +671,7 @@ namespace groute {
 
         void ReportInitialWork(int initial_work, Endpoint endpoint, const char* caller = "") override
         {
+            m_started = true; // Signal work has started 
             ReportWork(initial_work, 0, endpoint, caller, true);
         }
 
@@ -616,6 +682,8 @@ namespace groute {
 
         void ReportWork(int new_work, int performed_work, Endpoint endpoint, const char* caller, bool initial)
         {
+            MarkReportTime();
+
             int work = new_work - performed_work;
 
             if (FLAGS_count_work)
@@ -639,6 +707,8 @@ namespace groute {
                 if (m_deferred_work_counter == 0)
                 {
                     if (FLAGS_verbose) printf("Distributed Worklist shutting down successfully (%s)\n", caller);
+
+                    ExitWatchdog();
                     m_router.Shutdown();
                 }
 
@@ -658,6 +728,8 @@ namespace groute {
 
         void ReportDeferredWork(int new_work, int performed_work, Endpoint endpoint, const char* caller = "") override
         {
+            MarkReportTime();
+
             int work = new_work - performed_work;
 
             if (FLAGS_count_work)
