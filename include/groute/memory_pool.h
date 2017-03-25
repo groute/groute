@@ -270,7 +270,8 @@ namespace groute {
             factors.erase(factors.begin(), factors.begin() + num_po2_allocs);
             // And normalize again (this way we use whatever is left after power-of-two rounding's above)
             Normalize(factors);
-            // Use only the remaining size
+
+            // Use the remaining size
             size_t remaining = size - offset;
 
             for (const auto& f : factors)
@@ -285,6 +286,7 @@ namespace groute {
             // Currently we only round down power-of-two allocations, 
             // this can be improved by iterating over possibilities and making a wiser allocation distribution
             //
+
             return allocs;
         }
     };

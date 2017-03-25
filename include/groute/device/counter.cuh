@@ -64,7 +64,7 @@ namespace groute {
                 *m_counter = 0;
             }
                         
-            __device__ __forceinline__ uint32_t get_count() const
+            __device__ __forceinline__ uint32_t count() const
             {
                 return *m_counter;
             }
@@ -88,12 +88,21 @@ namespace groute {
     {
         enum { NUM_COUNTERS = 32 };
 
-        //
-        // device buffer / counters 
-        //
         uint32_t *m_counters;
         uint32_t *m_host_counter;
         int32_t m_current_slot;
+
+        void Alloc()
+        {
+            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, NUM_COUNTERS * sizeof(uint32_t)));
+            GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_counter, sizeof(uint32_t)));
+        }
+    
+        void Free()
+        {
+            GROUTE_CUDA_CHECK(cudaFree(m_counters));
+            GROUTE_CUDA_CHECK(cudaFreeHost(m_host_counter));
+        }
     
     public:
         Counter() : m_counters(nullptr), m_current_slot(-1)
@@ -110,21 +119,7 @@ namespace groute {
         }
         
         typedef dev::Counter DeviceObjectType;
-    
-    private:
-        void Alloc()
-        {
-            GROUTE_CUDA_CHECK(cudaMalloc(&m_counters, NUM_COUNTERS * sizeof(uint32_t)));
-            GROUTE_CUDA_CHECK(cudaMallocHost(&m_host_counter, sizeof(uint32_t)));
-        }
-    
-        void Free()
-        {
-            GROUTE_CUDA_CHECK(cudaFree(m_counters));
-            GROUTE_CUDA_CHECK(cudaFreeHost(m_host_counter));
-        }
-    
-    public:
+
         DeviceObjectType DeviceObject() const
         {
             assert(m_current_slot >= 0 && m_current_slot < NUM_COUNTERS);

@@ -142,15 +142,15 @@ namespace groute
         int prev_deferred_work, prev_immediate_work;
         if (TID_1D == 0)
         {
-            prev_deferred_work = deferred_worklist.len();
-            prev_immediate_work = immediate_worklist.len();
+            prev_deferred_work = deferred_worklist.count();
+            prev_immediate_work = immediate_worklist.count();
         }
 
         while (!cond.stop())
         {
             if (TID_1D == 0)
             {
-                *grid_work_size = remote_input.size(); // we must decide on work size globally  
+                *grid_work_size = remote_input.count(); // we must decide on work size globally  
             }
 
             grid_barrier.Sync();
@@ -162,28 +162,28 @@ namespace groute
 
             if (TID_1D == 0)
             {
-                new_immediate_work += (int)immediate_worklist.len();
+                new_immediate_work += (int)immediate_worklist.count();
                 performed_immediate_work += (int)work_size;
 
                 remote_input.pop(work_size);
                 prev_start = remote_input.get_start();
             }
 
-            if (immediate_worklist.len() == 0)
+            if (immediate_worklist.count() == 0)
                 break;
 
             // This work also fills remote_input
-            for (int chunk = 0; chunk < immediate_worklist.len(); chunk += chunk_size)
+            for (int chunk = 0; chunk < immediate_worklist.count(); chunk += chunk_size)
             {
                 grid_barrier.Sync();
 
                 // Perform work chunk
-                int cur_chunk = min(immediate_worklist.len() - chunk, chunk_size);
+                int cur_chunk = min(immediate_worklist.count() - chunk, chunk_size);
                 
                 // The work target for Work::work
                 dev::WorkTargetSplitSend<TLocal, TRemote, DWCallbacks> work_target(remote_input, remote_output, callbacks);
                 Work::work(
-                    dev::WorkSourceArray<TLocal>(immediate_worklist.m_data + chunk, cur_chunk),
+                    dev::WorkSourceArray<TLocal>(immediate_worklist.data_ptr() + chunk, cur_chunk),
                     work_target,
                     args...
                     );
@@ -202,7 +202,7 @@ namespace groute
             if (TID_1D == 0)
             {
                 new_immediate_work += remote_input.get_start_delta(prev_start);
-                performed_immediate_work += immediate_worklist.len();
+                performed_immediate_work += immediate_worklist.count();
 
                 immediate_worklist.reset();
             }
@@ -213,7 +213,7 @@ namespace groute
             __threadfence();
             // Report work
             *host_current_work_counter = new_immediate_work - performed_immediate_work - prev_immediate_work;
-            *host_deferred_work_counter = deferred_worklist.len() - prev_deferred_work;
+            *host_deferred_work_counter = deferred_worklist.count() - prev_deferred_work;
         }
     }
 

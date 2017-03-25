@@ -223,10 +223,10 @@ namespace groute {
 
                 if (m_context.configuration.trace)
                 {
-                    uint32_t immediate_in = immediate_worklist->GetLength(stream);
-                    uint32_t deferred_in = deferred_worklist->GetLength(stream);
-                    uint32_t remote_in = remote_input->GetLength(stream);
-                    uint32_t remote_out = remote_output->GetLength(stream);
+                    uint32_t immediate_in = immediate_worklist->GetCount(stream);
+                    uint32_t deferred_in = deferred_worklist->GetCount(stream);
+                    uint32_t remote_in = remote_input->GetCount(stream);
+                    uint32_t remote_out = remote_output->GetCount(stream);
 
                     printf(
                         "%d - start kernel, prio %d, LH: %d, LL: %d, RI: %d, RO: %d\n", 
