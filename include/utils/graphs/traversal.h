@@ -48,43 +48,43 @@
 
 #include <gflags/gflags.h>
 
-DECLARE_string(graphfile);
-DECLARE_bool(ggr);
+DECLARE_string(output);
+DECLARE_bool(check);
 DECLARE_bool(verbose);
 DECLARE_bool(trace);
-DECLARE_int32(repetitions);
+
+DECLARE_string(graphfile);
+DECLARE_bool(ggr);
+
 DECLARE_bool(gen_graph);
 DECLARE_int32(gen_nnodes);
 DECLARE_int32(gen_factor);
 DECLARE_int32(gen_method);
-DECLARE_bool(pn);
-DECLARE_uint64(wl_alloc_abs);
-DECLARE_double(wl_alloc_factor);
+DECLARE_bool(gen_weights);
+DECLARE_int32(gen_weight_range);
+
 DECLARE_double(pipe_alloc_factor);
 DECLARE_int32(pipe_alloc_size);
 DECLARE_double(pipe_size_factor);
 DECLARE_int32(pipe_size);
-DECLARE_uint64(work_subseg);
+
 DECLARE_int32(fragment_size);
 DECLARE_int32(cached_events);
 DECLARE_int32(block_size);
+
 DECLARE_bool(iteration_fusion);
 DECLARE_int32(fused_chunk_size);
 DECLARE_int32(prio_delta);
 DECLARE_bool(count_work);
-DECLARE_bool(stats);
+
 DECLARE_double(wl_alloc_factor_local);
 DECLARE_double(wl_alloc_factor_in);
 DECLARE_double(wl_alloc_factor_out);
 DECLARE_double(wl_alloc_factor_pass);
 
+DECLARE_bool(stats);
 DECLARE_bool(cta_np);
-
-DECLARE_bool(gen_weights);
-DECLARE_int32(gen_weight_range);
-
-DECLARE_string(output);
-DECLARE_bool(check);
+DECLARE_bool(pn);
 
 using std::min;
 using std::max;
@@ -310,10 +310,7 @@ namespace utils {
                 range_marker.Stop();
                 sw.stop();
 
-                if (FLAGS_repetitions > 1)
-                    printf("\nWarning: ignoring repetitions flag, running just one repetition (not implemented)\n");
-
-                printf("\n\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms() / FLAGS_repetitions);
+                printf("\n\n%s: %f ms. <filter>\n\n", Algo::Name(), sw.ms());
 
                 for (int i = 0; i < ngpus; ++i)
                 {

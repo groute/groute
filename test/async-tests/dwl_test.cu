@@ -26,6 +26,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include <gtest/gtest.h>
 
 #include "cuda_gtest_utils.h"
@@ -35,8 +36,6 @@
 #include <algorithm>
 #include <thread>
 #include <memory>
-
-#include <utils/app_skeleton.h>
 
 #include <groute/event_pool.h>
 #include <groute/dwl/distributed_worklist.cuh>
@@ -94,6 +93,11 @@ namespace histogram
             return work;
         }
         
+        __device__ __forceinline__ bool should_defer(int work, const int& global_threshold)
+        {
+            return false;
+        }
+        
         __device__ __host__ DWCallbacks(int split_seg_index, int split_seg_size)
             : m_seg_index(split_seg_index), m_seg_size(split_seg_size)
         {
@@ -107,7 +111,7 @@ namespace histogram
     };
 }
 
-
+template<typename TWorker>
 void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 {
     size_t histo_seg_size = histo_size / ngpus;
@@ -115,35 +119,21 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
 
     ASSERT_GT(histo_seg_size, 0);
 
-    size_t input_packet_size = work_size; // round_up(work_size, (size_t)ngpus * 2);
     size_t num_exch_buffs = 4 * ngpus;
-    size_t exch_packet_size = work_size; // round_up(work_size, num_exch_buffs);
+    size_t exch_packet_size = work_size; 
 
     groute::Context context(ngpus);
+    context.configuration.verbose = false;
+    context.configuration.trace = false;
 
     groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
-    groute::Router<int> input_router(context, groute::Policy::CreateScatterPolicy(host, groute::Endpoint::Range(ngpus)), 1, ngpus);    
-    groute::Link<int> send_link(host, input_router);
-
-    std::vector< groute::Link<int> > receiver_links;
-
-    for (int i = 0; i < ngpus; ++i)
-    {
-        receiver_links.push_back(groute::Link<int>(input_router, i, input_packet_size, 1));
-    }
 
     srand(static_cast <unsigned> (22522));
-    std::vector<int> host_worklist;
-
+    std::vector<int> initial_work;
     for (size_t ii = 0, count = work_size; ii < count; ++ii)
     {
-        host_worklist.push_back((rand()*round_up(histo_size, RAND_MAX)) % histo_size);
+        initial_work.push_back((rand()*round_up(histo_size, RAND_MAX)) % histo_size);
     }
-
-    send_link.Send(groute::Segment<int>(&host_worklist[0], host_worklist.size()), groute::Event());
-    send_link.Shutdown();
-    //
-    //
 
     std::vector<int*> dev_segs(ngpus);
 
@@ -163,10 +153,13 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
         callbacks[worker_endpoints[i]] = histogram::DWCallbacks(i, histo_seg_size);
     }
 
-    typedef groute::Worker<int, int, histogram::DWCallbacks, histogram::CountWork, int, int*> WorkerType;
+    groute::DistributedWorklist<int, int, histogram::DWCallbacks, TWorker> 
+        distributed_worklist(context, { host }, worker_endpoints, callbacks, exch_packet_size, num_exch_buffs, 0);
 
-    groute::DistributedWorklist<int, int, histogram::DWCallbacks, WorkerType> 
-        distributed_worklist(context, { /*No host sources*/ }, worker_endpoints, callbacks, exch_packet_size, num_exch_buffs, 0);
+    distributed_worklist.ReportInitialWork(initial_work.size(), host);
+    distributed_worklist
+        .GetLink(host)
+        .Send(groute::Segment<int>(&initial_work[0], initial_work.size()), groute::Event());
 
     std::vector<std::thread> workers;
     groute::internal::Barrier barrier(ngpus);
@@ -178,21 +171,11 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
             context.SetDevice(i);
             groute::Stream stream = context.CreateStream(i);
 
-            auto worklist_peer = distributed_worklist.GetPeer(i);
-
-            auto input_fut = receiver_links[i].PipelinedReceive();
-            auto input_seg = input_fut.get();
-
-            distributed_worklist.ReportInitialWork(input_seg.GetSegmentSize(), i);
-
             barrier.Sync();
 
             //
             // Start processing  
             //
-
-            input_seg.Wait(stream.cuda_stream);
-            worklist_peer->SplitSend(input_seg, stream);
 
             // Loop over the work until convergence  
             distributed_worklist.Work(i, stream, i*histo_seg_size, dev_segs[i]);
@@ -212,7 +195,7 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     std::vector<int> regression_segs(histo_seg_size*ngpus, 0);
     std::vector<int> host_segs(histo_seg_size*ngpus);
 
-    for (auto it : host_worklist)
+    for (auto it : initial_work)
     {
         ++regression_segs[it];
     }
@@ -252,36 +235,74 @@ void TestHistogramWorklist(int ngpus, size_t histo_size, size_t work_size)
     }
 }
 
+    
+typedef groute::FusedWorker<true, int, int, int, histogram::DWCallbacks, histogram::CountWork, int, int*> FusedWorkerType;
+typedef groute::Worker<int, int, histogram::DWCallbacks, histogram::CountWork, int, int*> WorkerType;
 
-TEST(DistributedWorklist, Ring_2)
+
+TEST(DWL, Worker_2)
 {
-    TestHistogramWorklist(2, 1024, 4096);
-    TestHistogramWorklist(2, 1024, 20000);
-    TestHistogramWorklist(2, 10000, 4096);
-    TestHistogramWorklist(2, 10000, 200000);
+    TestHistogramWorklist<WorkerType>(2, 1024, 4096);
+    TestHistogramWorklist<WorkerType>(2, 1024, 20000);
+    TestHistogramWorklist<WorkerType>(2, 10000, 4096);
+    TestHistogramWorklist<WorkerType>(2, 10000, 200000);
 }
 
-TEST(DistributedWorklist, Ring_4)
+TEST(DWL, Worker_4)
 {
-    TestHistogramWorklist(4, 2048, 4096);
-    TestHistogramWorklist(4, 2048, 20000);
-    TestHistogramWorklist(4, 10000, 4096);
-    TestHistogramWorklist(4, 10000, 200000);
+    TestHistogramWorklist<WorkerType>(4, 2048, 4096);
+    TestHistogramWorklist<WorkerType>(4, 2048, 20000);
+    TestHistogramWorklist<WorkerType>(4, 10000, 4096);
+    TestHistogramWorklist<WorkerType>(4, 10000, 200000);
 }
 
-TEST(DistributedWorklist, Ring_8)
+TEST(DWL, Worker_8)
 {
-    TestHistogramWorklist(8, 1024, 4096);
-    TestHistogramWorklist(8, 1024, 20000);
-    TestHistogramWorklist(8, 10000, 4096);
-    TestHistogramWorklist(8, 10000, 200000);
+    TestHistogramWorklist<WorkerType>(8, 1024, 4096);
+    TestHistogramWorklist<WorkerType>(8, 1024, 20000);
+    TestHistogramWorklist<WorkerType>(8, 10000, 4096);
+    TestHistogramWorklist<WorkerType>(8, 10000, 200000);
 }
 
-TEST(DistributedWorklist, Ring_N)
+TEST(DWL, Worker_N)
 {
-    TestHistogramWorklist(3, 10000, 20000);
-    TestHistogramWorklist(4, 10000, 20000);
-    TestHistogramWorklist(5, 10000, 20000);
-    TestHistogramWorklist(15, 10000, 20000);
-    TestHistogramWorklist(27, 10000, 20000);
+    TestHistogramWorklist<WorkerType>(3, 10000, 20000);
+    TestHistogramWorklist<WorkerType>(4, 10000, 20000);
+    TestHistogramWorklist<WorkerType>(5, 10000, 20000);
+    TestHistogramWorklist<WorkerType>(15, 10000, 20000);
+    TestHistogramWorklist<WorkerType>(27, 10000, 20000);
+}
+
+
+TEST(DWL, FusedWorker_2)
+{
+    TestHistogramWorklist<FusedWorkerType>(2, 1024, 4096);
+    TestHistogramWorklist<FusedWorkerType>(2, 1024, 20000);
+    TestHistogramWorklist<FusedWorkerType>(2, 10000, 4096);
+    TestHistogramWorklist<FusedWorkerType>(2, 10000, 200000);
+}
+
+TEST(DWL, FusedWorker_4)
+{
+    TestHistogramWorklist<FusedWorkerType>(4, 2048, 4096);
+    TestHistogramWorklist<FusedWorkerType>(4, 2048, 20000);
+    TestHistogramWorklist<FusedWorkerType>(4, 10000, 4096);
+    TestHistogramWorklist<FusedWorkerType>(4, 10000, 200000);
+}
+
+TEST(DWL, FusedWorker_8)
+{
+    TestHistogramWorklist<FusedWorkerType>(8, 1024, 4096);
+    TestHistogramWorklist<FusedWorkerType>(8, 1024, 20000);
+    TestHistogramWorklist<FusedWorkerType>(8, 10000, 4096);
+    TestHistogramWorklist<FusedWorkerType>(8, 10000, 200000);
+}
+
+TEST(DWL, FusedWorker_N)
+{
+    TestHistogramWorklist<FusedWorkerType>(3, 10000, 20000);
+    TestHistogramWorklist<FusedWorkerType>(4, 10000, 20000);
+    TestHistogramWorklist<FusedWorkerType>(5, 10000, 20000);
+    TestHistogramWorklist<FusedWorkerType>(15, 10000, 20000);
+    TestHistogramWorklist<FusedWorkerType>(27, 10000, 20000);
 }

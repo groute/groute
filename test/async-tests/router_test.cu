@@ -26,6 +26,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include <cmath>
 #include <gtest/gtest.h>
 
@@ -84,8 +85,10 @@ void FragmentedCopy(size_t buffer_size, size_t fragment_size)
         host[i] = i;
     }
 
-    // The event manager
+    // The global context
     groute::Context context;
+    context.configuration.verbose = false;
+    context.configuration.trace = false;
 
     int *dev;
     CUASSERT_NOERR(cudaMalloc(&dev, host.size() * sizeof(int)));
@@ -149,6 +152,8 @@ void H2DevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_size
     }
 
     groute::Context context(ngpus);
+    context.configuration.verbose = false;
+    context.configuration.trace = false;
 
     if (fragment_size > 0)
         context.EnableFragmentation(fragment_size);
@@ -256,6 +261,8 @@ void P2PDevsRouting(int ngpus, int buffer_size, int chunk_size, int fragment_siz
     }
 
     groute::Context context(ngpus);
+    context.configuration.verbose = false;
+    context.configuration.trace = false;
 
     if (fragment_size > 0)
         context.EnableFragmentation(fragment_size);
