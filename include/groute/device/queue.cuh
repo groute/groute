@@ -354,10 +354,11 @@ namespace groute {
             Entry(Endpoint endpoint, const char* name, uint32_t capacity) : endpoint(endpoint), name(name), capacity(capacity), max_usage(0) { }
         };
 
-        std::vector<Entry> m_entries;
+        int m_index_gen;
+        std::map<int, Entry> m_entries;
         std::atomic<bool> m_exiting;
 
-        QueueMemoryMonitor() : m_exiting(false) { }
+        QueueMemoryMonitor() : m_index_gen(0), m_exiting(false) { }
 
         static QueueMemoryMonitor& Instance()
         {
@@ -367,21 +368,28 @@ namespace groute {
 
         int RegisterInternal(uint32_t capacity, Endpoint endpoint, const char* name)
         {
-            m_entries.push_back(Entry(endpoint, name, capacity));
-            return m_entries.size() - 1;
+            int index = m_index_gen++;
+            m_entries[index] = Entry(endpoint, name, capacity);
+            return index;
+        }
+
+        void UnregisterInternal(int index)
+        {
+            if (m_entries.find(index) == m_entries.end()) return;
+            m_entries.erase(m_entries.find(index));
         }
 
         void ReportUsageInternal(int index, uint32_t usage)
         {
-            if (index < 0 || index >= m_entries.size()) return;
+            if (m_entries.find(index) == m_entries.end()) return;
 
             // Keeping the max_usage update not thread-safe.
             // As long as we dont miss an overflow its ok
 
-            if (usage > m_entries[index].max_usage)
-                m_entries[index].max_usage = usage;
+            if (usage > m_entries.at(index).max_usage)
+                m_entries.at(index).max_usage = usage;
 
-            if (usage > m_entries[index].capacity)
+            if (usage > m_entries.at(index).capacity)
             {
                 //
                 // We got an overflow, report overall usage stats and exit 
@@ -393,8 +401,9 @@ namespace groute {
                 std::map<Endpoint, std::map<std::string, std::vector<Entry>>> grouped_entries;
                 size_t name_max = 0;
 
-                for (const auto& entry : m_entries)
+                for (const auto& ep : m_entries)
                 {
+                    const Entry& entry = ep.second;
                     std::string name(entry.name);
                     name_max = std::max(name.size(), name_max);
 
@@ -436,6 +445,11 @@ namespace groute {
         static int Register(uint32_t capacity, Endpoint endpoint, const char* name)
         {
             return Instance().RegisterInternal(capacity, endpoint, name);
+        }
+
+        static void Unregister(int index)
+        {
+            return Instance().UnregisterInternal(index);
         }
 
         static void ReportUsage(int instance_id, uint32_t usage)
@@ -487,6 +501,8 @@ namespace groute {
         void Free()
         {
             if (m_capacity == 0) return;
+            
+            QueueMemoryMonitor::Unregister(m_instance_id);
 
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaFree(m_data));
@@ -642,6 +658,8 @@ namespace groute {
         void Free()
         {
             if (m_capacity == 0) return;
+            
+            QueueMemoryMonitor::Unregister(m_instance_id);
 
             if (m_mem_owner)
                 GROUTE_CUDA_CHECK(cudaFree(m_data));
