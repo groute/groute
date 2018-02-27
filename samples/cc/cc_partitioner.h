@@ -143,7 +143,7 @@ namespace cc
 
     struct EdgesMetadata
     {
-        std::vector<groute::device_t> dst_devs;
+        std::vector<groute::Endpoint> dst_endpoints;
     };
 
     class EdgePartitioner
@@ -162,8 +162,6 @@ namespace cc
         EdgePartitioner(int ngpus, int nvtxs, const groute::Segment<Edge>& all_edges, bool vertex_partitioning = false) :
             m_ngpus(ngpus), m_nvtxs(nvtxs), m_vertex_partitioning(vertex_partitioning)
         {
-            assert(groute::Device::IsHost(src_dev));
-
             if (m_vertex_partitioning)
             {
                 m_metadata_ptrs.reserve(m_ngpus);
@@ -187,7 +185,7 @@ namespace cc
                     int end = (i == npartitions - 1) ? nedges : partitions[i + 1].index;
 
                     m_metadata_ptrs.emplace_back(groute::make_unique<EdgesMetadata>());
-                    m_metadata_ptrs[i]->dst_devs = { i };
+                    m_metadata_ptrs[i]->dst_endpoints = { i };
                     edge_partitions.push_back(groute::Segment<Edge>(ptr + start, nedges, end - start, start, (EdgesMetadata*) m_metadata_ptrs[i].get() /*metadata field*/));
 
                     int lower = partitions[i].bounds.global_lower;
@@ -217,38 +215,31 @@ namespace cc
         }
     };
 
-    class EdgeScatterPolicy : public groute::router::IPolicy
+    class EdgeScatterPolicy : public groute::IPolicy
     {
     private:
-        groute::RoutingTable m_topology;
+        groute::EndpointList m_dst_endpoints;
 
     public:
-        std::vector<Partition> parents_partitions;
-
         EdgeScatterPolicy(int ngpus)
         {
-            m_topology[groute::Device::Host] = range(ngpus);
+            m_dst_endpoints = groute::Endpoint::Range(ngpus);
         }
 
-        groute::RoutingTable GetRoutingTable() override
+        groute::Route GetRoute(groute::Endpoint src, const groute::EndpointList& router_dst, void* message_metadata) const override
         {
-            return m_topology;
-        }
-
-        groute::router::Route GetRoute(groute::device_t src_dev, void* message_metadata) override
-        {
-            assert(groute::Device::IsHost(src_dev));
-            groute::router::Route route;
+            assert(src.IsHost());
+            groute::Route route;
 
             if (message_metadata == nullptr)
             {
-                route.dst_devs = m_topology[groute::Device::Host];
+                route.dst_endpoints = m_dst_endpoints;
             }
 
             else
             {
-                route.dst_devs = ((EdgesMetadata*)message_metadata)->dst_devs; // expecting the void* metadata to contain an EdgesMetadata structure  
-                route.strategy = groute::router::Priority;
+                route.dst_endpoints = ((EdgesMetadata*)message_metadata)->dst_endpoints; // expecting the void* metadata to contain an EdgesMetadata structure  
+                route.strategy = groute::Priority;
             }
 
             return route;

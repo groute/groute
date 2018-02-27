@@ -36,6 +36,8 @@
 #include <climits>
 #include <type_traits>
 
+#include <groute/internal/cuda_utils.h>
+
 
 namespace {
     static inline __host__ __device__ size_t round_up(
@@ -58,7 +60,7 @@ namespace {
     inline std::vector<int> range(int count, int from = 0)
     {
         std::vector<int> vec(count);
-        for (size_t i = 0; i < count; i++)
+        for (int i = 0; i < count; i++)
         {
             vec[i] = from + i;
         }
@@ -68,11 +70,29 @@ namespace {
 }
 
 
-
 namespace groute {
 
+#ifdef WIN32
+    using exception = std::exception;
+#else
+    class exception : public std::exception 
+    {
+        const char* m_message;
+
+    public:
+        exception(const char* message) : m_message(message) { }
+        exception() : m_message(nullptr) { }
+        const char* what() const noexcept 
+        {
+            return m_message == nullptr ? std::exception::what() : m_message; 
+        }
+    };
+#endif
+
+    typedef int device_t;
+
     /**
-    * @brief Device related metadata  
+    * @brief Device (physical) related metadata  
     */
     class Device
     {
@@ -84,59 +104,101 @@ namespace groute {
             Null = INT32_MIN,
             Host = -1
         };
-
-        static bool IsHost(int dev) { return dev == Host; }
-        static bool IsNull(int dev) { return dev < Host; }
     };
 
-    typedef int device_t;
+    /**
+    * @brief Represents an Endpoint (possibly virtual) in the system   
+    * @note By convention, Host endpoints should be represented by negative numbers and GPU endpoints by non-negative (i.e. >=0) numbers
+    */
+    struct Endpoint 
+    {
+        typedef int identity_type;
+    
+    private:
+        identity_type m_identity;
+    
+        enum : identity_type
+        {
+            Null = INT32_MIN,
+            Host = -1
+        };
+    
+    public:
+        Endpoint(identity_type identity) : m_identity(identity) { } // Implicit conversion from int  
+        Endpoint() : m_identity(Null) { }
+    
+        explicit operator identity_type() const { return m_identity; } // Use this to obtain the identity value 
+        
+        bool operator< (const Endpoint& other) const { return m_identity <  other.m_identity; }
+        bool operator<=(const Endpoint& other) const { return m_identity <= other.m_identity; }
+        bool operator> (const Endpoint& other) const { return m_identity >  other.m_identity; }
+        bool operator>=(const Endpoint& other) const { return m_identity >= other.m_identity; }
+        bool operator==(const Endpoint& other) const { return m_identity == other.m_identity; }
 
-    typedef device_t Endpoint; 
+        bool IsGPU () const { return m_identity >= 0; } // Any non-negative number can represent a GPU endpoint
+        bool IsHost() const { return m_identity <= Host && m_identity != Null; } // Any negative number but 'Null' can represent a Host endpoint
+        bool IsNull() const { return m_identity == Null; }
 
-    typedef std::map<device_t, std::vector<device_t>> RoutingTable;
+        static std::vector<Endpoint> Range(int count, identity_type from = 0, bool reverse = false)
+        {
+            std::vector<Endpoint> vec(count);
+            for (int i = 0; i < count; i++) 
+            {
+                vec[i] = reverse ? from - i : from + i;
+            }
+
+            return std::move(vec);
+        }
+
+        static Endpoint HostEndpoint(int i) { return Host*(i+1); }  // Get the i'th Host endpoint (-1, -2, ...)
+        static Endpoint GPUEndpoint (int i) { return i; }           // Get the i'th GPU endpoint (0, 1, 2, ...)
+    };
+
+    typedef std::vector<Endpoint> EndpointList;
+    typedef std::map<Endpoint, EndpointList> RoutingTable;
 
     enum LaneType
     {
-        In, Out, Internal
+        In, Out, Intra
     };
 
-    typedef std::pair<device_t, LaneType> LaneIdentifier;
+    typedef std::pair<Endpoint, LaneType> LaneIdentifier;
 
     struct Lane
     {
-        device_t src_dev;
-        device_t dst_dev;
+        Endpoint src;
+        Endpoint dst;
 
-        Lane() : src_dev(Device::Null), dst_dev(Device::Null) { }
-        Lane(device_t src_dev, device_t dst_dev) : src_dev(src_dev), dst_dev(dst_dev) { }
+        Lane() { }
+        Lane(Endpoint src, Endpoint dst) : src(src), dst(dst) { }
 
         LaneIdentifier GetIdentifier() const
         {
-            assert(!Device::IsNull(src_dev));
-            assert(!Device::IsNull(dst_dev));
+            assert(!src.IsNull());
+            assert(!dst.IsNull());
 
-            device_t dev;
+            Endpoint endpoint;
             LaneType type;
 
-            if (src_dev == dst_dev) // internal
+            if (src == dst) // Intra endpoint
             {
-                dev = src_dev;
-                type = Internal;
+                endpoint = src;
+                type = Intra;
             }
 
-            else if (Device::IsHost(src_dev)) // host -> gpu
+            else if (src.IsHost()) // Host -> GPU / Host
             {
-                dev = dst_dev;
+                endpoint = dst; // when source is host, stream/lane is determined by destination endpoint 
                 type = In;
             }
 
-            else // gpu -> host / peers
+            else // GPU -> Host / peers
             {
-                dev = src_dev;
+                endpoint = src;
                 type = Out;
             }
 
-            return std::make_pair(dev, type);
+            return std::make_pair(endpoint, type);
         }
     };
 
@@ -147,11 +209,13 @@ namespace groute {
     class Buffer
     {
     private:
-        T* const m_ptr;
-        const size_t m_size;
+        T* m_ptr;
+        size_t m_size;
 
     public:
         Buffer(T* ptr, size_t size) : m_ptr(ptr), m_size(size) { }
+        Buffer() : m_ptr(nullptr), m_size(0) { }
+
         T* GetPtr() const   { return m_ptr; }
         size_t GetSize() const    { return m_size; }
     };
@@ -211,7 +275,7 @@ namespace groute {
 #ifndef NDEBUG
             if (relative_offset > m_segment_size ||
                 sub_segment_size > m_segment_size - relative_offset)
-                throw std::exception(); // out of segment range
+                throw groute::exception(); // out of segment range
 #endif
             return Segment<T>(
                 m_segment_ptr + relative_offset, m_total_size, sub_segment_size, m_segment_offset + relative_offset, metadata);
@@ -245,7 +309,112 @@ namespace groute {
         }
     };
 
-    
+    enum StreamPriority
+    {
+        SP_Default, SP_High, SP_Low
+    };
+
+    class Stream
+    {
+    public:
+        cudaStream_t    cuda_stream;
+        cudaEvent_t     sync_event;
+
+        Stream(int physical_dev, StreamPriority priority) : cuda_stream(nullptr), sync_event(nullptr)
+        {
+            GROUTE_CUDA_CHECK(cudaSetDevice(physical_dev));
+            Init(priority);
+        }
+
+        Stream(StreamPriority priority) : cuda_stream(nullptr), sync_event(nullptr)
+        {
+            Init(priority);
+        }
+
+        Stream() : cuda_stream(nullptr), sync_event(nullptr)
+        {
+        }
+
+        void Init(StreamPriority priority)
+        {
+            Destroy();
+
+            if (priority == SP_Default)
+            {
+                GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking));
+                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
+            }
+
+            else
+            {
+                int leastPriority, greatestPriority;
+                cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority); // range: [*greatestPriority, *leastPriority]
+
+                GROUTE_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, priority == SP_High ? greatestPriority : leastPriority));
+                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
+            }
+        }
+
+        void Destroy()
+        {
+            if (cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
+            if (sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
+
+            cuda_stream = nullptr;
+            sync_event = nullptr;
+        }
+
+        Stream(const Stream& other) = delete;
+
+        Stream(Stream&& other) : cuda_stream(other.cuda_stream), sync_event(other.sync_event)
+        {
+            other.cuda_stream = nullptr;
+            other.sync_event = nullptr;
+        }
+
+        Stream& operator=(const Stream& other) = delete;
+
+        Stream& operator=(Stream&& other) 
+        {
+            Destroy();
+
+            cuda_stream = other.cuda_stream;
+            sync_event = other.sync_event;
+
+            other.cuda_stream = nullptr;
+            other.sync_event = nullptr;
+
+            return *this;
+        }
+
+        ~Stream()
+        {
+            Destroy();
+        }
+
+        void Sync() const
+        {
+            GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
+            GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
+        }
+
+        void BeginSync() const
+        {
+            GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
+        }
+
+        bool Query() const
+        {
+            return cudaEventQuery(sync_event) == cudaSuccess;
+        }
+
+        void EndSync() const
+        {
+            GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
+        }
+    };
+
+
     template<typename Future>
     bool is_ready(const Future& f)
     {
@@ -265,14 +434,26 @@ namespace groute {
         return fut;
     }
 
-    // workaround for C++11
+    // workaround for VS C++11
     template<typename T, typename... Args>
     std::unique_ptr<T> make_unique(Args&&... args)
     {
         return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
     }
-
+}
     
+namespace std
+{
+    template<>
+	struct hash<groute::Endpoint>
+		: private hash<groute::Endpoint::identity_type>
+	{	// hash functor for Endpoint (to enable usage as key)
+        size_t operator()(const groute::Endpoint& endpoint) const
+        {
+            return hash<groute::Endpoint::identity_type>::operator()(
+                static_cast<groute::Endpoint::identity_type>(endpoint));
+        }
+	};
 }
 
 #endif // __GROUTE_COMMON_H

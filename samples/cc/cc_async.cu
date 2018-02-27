@@ -75,24 +75,23 @@ DEFINE_bool(inverse_topology, false, "Inverse the top down topology (problem con
 
 bool RunCCMAsyncAtomic(int ngpus)
 {
-    cc::Context context(FLAGS_graphfile, FLAGS_ggr, FLAGS_verbose, ngpus);
+    cc::Context context(FLAGS_graphfile, ngpus);
 
     cc::Configuration configuration;
     if (FLAGS_auto_config)
         cc::BuildConfigurationAuto( // Deduce the configuration automatically  
-        ngpus, context.nedges, context.nvtxs,
-        FLAGS_compute_latency_ratio, FLAGS_degree_threshold,
-        FLAGS_nonatomic_rounds,
-        configuration
-        );
+            ngpus, context.nedges, context.nvtxs,
+            FLAGS_compute_latency_ratio, FLAGS_degree_threshold,
+            FLAGS_nonatomic_rounds,
+            configuration);
     else
         cc::BuildConfiguration(
-        ngpus, context.nedges, context.nvtxs,
-        FLAGS_edge_segs, FLAGS_parent_segs,
-        FLAGS_edges_chunk, FLAGS_parents_chunk,
-        FLAGS_input_buffers, FLAGS_reduce_buffers,
-        FLAGS_nonatomic_rounds, FLAGS_vertex_partitioning,
-        configuration);
+            ngpus, context.nedges, context.nvtxs,
+            FLAGS_edge_segs, FLAGS_parent_segs,
+            FLAGS_edges_chunk, FLAGS_parents_chunk,
+            FLAGS_input_buffers, FLAGS_reduce_buffers,
+            FLAGS_nonatomic_rounds, FLAGS_vertex_partitioning,
+            configuration);
 
     if (FLAGS_verbose) configuration.print();
 
@@ -109,26 +108,19 @@ bool RunCCMAsyncAtomic(int ngpus)
         groute::Segment<Edge> all_edges = groute::Segment<Edge>(&context.host_edges[0], context.nedges, context.nedges, 0);
         cc::EdgePartitioner partitioner(ngpus, context.nvtxs, all_edges, configuration.vertex_partitioning);
 
-        auto reduction_policy = FLAGS_tree_topology
-            ? groute::router::Policy::CreateTreeReductionPolicy(ngpus)
-            : groute::router::Policy::CreateOneWayReductionPolicy(ngpus);
-
-        groute::router::Router<Edge> input_router(context, std::make_shared<cc::EdgeScatterPolicy>(ngpus));
-        groute::router::Router<int> reduction_router(context, reduction_policy);
-
-        groute::router::ISender<Edge>* host_sender = input_router.GetSender(groute::Device::Host);
-        groute::router::IReceiver<int>* host_receiver = reduction_router.GetReceiver(groute::Device::Host); // TODO
-
-        IntervalRangeMarker iter_rng(context.nedges, "begin");
-
-        for (auto& edge_partition : partitioner.edge_partitions)
-        {
-            host_sender->Send(edge_partition, groute::Event());
-        }
-        host_sender->Shutdown();
-
-        psw.stop();
+        psw.stop(); // Partitioning time
         par_total_ms += psw.ms();
+
+        auto reduction_policy = FLAGS_tree_topology
+            ? groute::Policy::CreateTreeReductionPolicy(ngpus)
+            : groute::Policy::CreateOneWayReductionPolicy(ngpus);
+
+        groute::Router<Edge> input_router(context, (std::shared_ptr<groute::IPolicy>)std::make_shared<cc::EdgeScatterPolicy>(ngpus), 1, ngpus);
+        groute::Router<component_t> reduction_router(context, reduction_policy, ngpus, ngpus+1);
+
+        groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+        groute::Link<Edge> send_link(host, input_router);
+        groute::Link<component_t> receive_link(reduction_router, host, 0, 0); // no pipelining here 
 
         std::vector< std::unique_ptr<cc::Problem> > problems;
         std::vector< std::unique_ptr<cc::Solver> > solvers;
@@ -136,7 +128,7 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         dim3 block_dims(MASYNC_BS, 1, 1);
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             problems.emplace_back(new cc::Problem(context, partitioner.parents_partitions[i], i, block_dims));
             solvers.emplace_back(new cc::Solver(context, *problems.back()));
@@ -147,15 +139,23 @@ bool RunCCMAsyncAtomic(int ngpus)
             solvers[i]->reduction_out = groute::Link<component_t>(i, reduction_router);
         }
 
-        for (size_t i = 0; i < ngpus; ++i)
+        IntervalRangeMarker iter_rng(context.nedges, "begin");
+
+        for (auto& edge_partition : partitioner.edge_partitions)
         {
-            // Sync the first copy operations (exclude from timing)
-            solvers[i]->edges_in.Sync();
+            send_link.Send(edge_partition, groute::Event());
+        }
+        send_link.Shutdown();
+
+        for (int i = 0; i < ngpus; ++i)
+        {
+            // Sync the first pipeline copy operations (exclude from timing)
+            solvers[i]->edges_in.PipelineSync();
         }
 
         groute::internal::Barrier barrier(ngpus + 1); // barrier for accurate timing  
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             // Run workers  
             std::thread worker(
@@ -171,10 +171,10 @@ bool RunCCMAsyncAtomic(int ngpus)
         }
 
         barrier.Sync();
-        Stopwatch sw(true); // all threads are running, start timing
-        barrier.Sync();
+        Stopwatch sw(true); // all threads are running, start timing 
+        barrier.Sync();     // and signal
 
-        for (size_t i = 0; i < ngpus; ++i)
+        for (int i = 0; i < ngpus; ++i)
         {
             // Join threads  
             workers[i].join();
@@ -185,8 +185,8 @@ bool RunCCMAsyncAtomic(int ngpus)
 
         // output is received from the drain device (by topology)  
         auto seg
-            = host_receiver
-                ->Receive(groute::Buffer<int>(&context.host_parents[0], context.nvtxs), groute::Event())
+            = receive_link
+                .Receive(groute::Buffer<component_t>(&context.host_parents[0], context.nvtxs), groute::Event())
                 .get();
         seg.Sync();
     }

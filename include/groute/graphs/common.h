@@ -30,22 +30,20 @@
 #ifndef __GROUTE_GRAPHS_COMMON_H
 #define __GROUTE_GRAPHS_COMMON_H
 
+#include <cuda_runtime.h>
+
+typedef uint32_t index_t;
 
 namespace groute {
 namespace graphs {
 
-    struct Edge {
-        union
-        {
-            unsigned long long int pair;
-            struct
-            {
-                unsigned int u;
-                unsigned int v;
-            };
-        };
+    struct Edge 
+    {
+        index_t u, v;
+        __host__ __device__ Edge() : u(0), v(0) { }
+        __host__ __device__ Edge(index_t u, index_t v) : u(u), v(v) { }
     };
-    }
+}
 }
 
 

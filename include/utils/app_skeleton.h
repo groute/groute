@@ -48,66 +48,61 @@
 #define RUN_ALL false
 #endif
 
-
+// App
 DEFINE_bool(interactive, false, "Run an interactive session");
 DEFINE_string(cmdfile, "", "A file with commands to execute");
-
 DEFINE_int32(num_gpus, 2, "Override number of GPUs (or negative to use the amount of available GPUs)");
 DEFINE_int32(startwith, 1, "Start with a specific number of GPUs");
 
-DEFINE_string(output, "", "File to store output to");
-DEFINE_bool(check, false, "Check results");
-
-/* variants */
+// Variants
 DEFINE_bool(all, false, "Run all variants");
 DEFINE_bool(single, false, "Run the single GPU variant");
 DEFINE_bool(async_multi, true, "Run the async multigpu variant");
 DEFINE_bool(opt, true, "Run the optimized (prio + fusion) async multigpu variant");
 
+// General
+DEFINE_string(output, "", "File to store output to");
+DEFINE_bool(check, false, "Check results");
+DEFINE_bool(verbose, true, "Verbose prints");
+DEFINE_bool(trace, false, "Trace prints (effects performance)");
 
-// Here as a workaround for now
-#ifndef NDEBUG
-#define VERBOSE true
-#define REPETITIONS_DEFAULT 1
-#else
-#define VERBOSE false
-#define REPETITIONS_DEFAULT 1
-#endif
+// Input file/format
 DEFINE_string(graphfile, "", "A file with a graph in Dimacs 10 format");
 DEFINE_bool(ggr, true, "Graph file is a Galois binary GR file");
-DEFINE_bool(verbose, VERBOSE, "Verbose prints");
-DEFINE_int32(repetitions, REPETITIONS_DEFAULT, "Repetitions of GPU tests");
+
+// Graph generation
 DEFINE_bool(gen_graph, false, "Generate a random graph");
 DEFINE_int32(gen_nnodes, 100000, "Number of nodes for random graph generation");
 DEFINE_int32(gen_factor, 10, "A factor number for graph generation");
 DEFINE_int32(gen_method, 0, "Select the requested graph generation method: \n\t0: Random graph \n\t1: Two-way chain graph without segment intersection \n\t2: Two-way chain graph with intersection \n\t3: Full cliques per device without segment intersection");
-DEFINE_uint64(wl_alloc_abs, 0, "Absolute size for local worklists (if not zero, overrides --wl_alloc_factor");
-DEFINE_double(wl_alloc_factor, 0.2, "Local worklists will allocate '(nedges / ngpus)' times this factor");
+DEFINE_bool(gen_weights, false, "Generate edge weights if missing in graph input");
+DEFINE_int32(gen_weight_range, 100, "The range to generate edge weights from (coordinate this parameter with nf-delta if running sssp-nf)");
+
+// Pipeline parameters
 DEFINE_double(pipe_alloc_factor, 0.05, "Each socket pipeline buffer will allocate 'nnodes' times this factor");
 DEFINE_int32(pipe_alloc_size, -1, "Each socket pipeline buffer will allocate 'pipe_alloc_size' items per buffer");
 DEFINE_double(pipe_size_factor, 4, "Each socket pipeline will allocate 'ngpus' times this factor buffers");
 DEFINE_int32(pipe_size, -1, "Each socket pipeline will allocate 'pipe_size' buffers");
-DEFINE_uint64(work_subseg, 0, "A parameter for breaking the actual workload of the algorithm into sub-segments");
+
+// System 
 DEFINE_int32(fragment_size, -1, "Fragment size for all memcpy operations");
 DEFINE_int32(cached_events, 8, "Number of events to cache in each event pool (per device)");
 DEFINE_int32(block_size, 256, "Block size for traversal kernels");
+
+// Fused kernel
 DEFINE_bool(iteration_fusion, true, "Fuse multiple iterations (FusedWork kernel performs one iteration each launch if this is false)");
+DEFINE_int32(fused_chunk_size, INT32_MAX, "Size of chunk to work on within fused kernel");
 DEFINE_int32(prio_delta, 10, "The soft priority delta");
 DEFINE_bool(count_work, false, "Count the work-items performed by each individual GPU");
-DEFINE_bool(stats, false, "Print graph statistics and exit");
-DEFINE_bool(warp_append, true, "Use warp aggregated operations for worklist append's");
-DEFINE_bool(debug_print, false, "Print detailed debug info");
-DEFINE_bool(high_priority_receive, true, "Use a high priority stream for split receive");
 
-DEFINE_bool(cta_np, true, "Use nested parallelism withing traversal kernels");
-
-DEFINE_double(wl_alloc_factor_local, 0.2, "Worklist allocation factor: local worklist");
+// DWL
+DEFINE_double(wl_alloc_factor_local, 0.2, "Worklist allocation factor: local worklist/s");
 DEFINE_double(wl_alloc_factor_in, 0.4, "Worklist allocation factor: incoming worklist");
 DEFINE_double(wl_alloc_factor_out, 0.2, "Worklist allocation factor: outgoing worklist");
 DEFINE_double(wl_alloc_factor_pass, 0.2, "Worklist allocation factor: pass-through worklist");
 
-DEFINE_bool(gen_weights, false, "Generate edge weights if missing in graph input");
-DEFINE_int32(gen_weight_range, 100, "The range to generate edge weights from (coordinate this parameter with nf-delta if running sssp-nf)");
+DEFINE_bool(stats, false, "Print graph statistics and exit");
+DEFINE_bool(cta_np, true, "Use nested parallelism withing traversal kernels");
 
 #ifdef HAVE_METIS
 DEFINE_bool(pn, true, "Partition the input graph using METIS (requires a symmetric graph)");
@@ -115,7 +110,6 @@ DEFINE_bool(pn, true, "Partition the input graph using METIS (requires a symmetr
 DEFINE_bool(pn, false, "[BINARY NOT BUILT WITH METIS] Partition the input graph using METIS (requires a symmetric graph)");
 #endif
 
-DECLARE_bool(stats);
 
 template<typename App>
 struct Skeleton

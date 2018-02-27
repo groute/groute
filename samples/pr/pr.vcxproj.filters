@@ -13,12 +13,18 @@
     <Filter Include="groute\graphs">
       <UniqueIdentifier>{e21c12c5-278e-42ae-9bcd-bcdaea1b1f78}</UniqueIdentifier>
     </Filter>
+    <Filter Include="groute\dwl">
+      <UniqueIdentifier>{f445be1c-d54f-4714-958b-29f8345cbcba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="groute\device">
+      <UniqueIdentifier>{71f64997-05ce-4365-b1d9-1afc37b81d37}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="utils\graphs">
+      <UniqueIdentifier>{aa40d47a-b1c7-44f7-b3ec-12ba09510cf5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\groute\event_pool.h">
-      <Filter>groute</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\worklist.h">
       <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\common.h">
@@ -48,18 +54,12 @@
     <ClInclude Include="..\..\include\groute\memcpy.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\distributed_worklist.h">
-      <Filter>groute</Filter>
-    </ClInclude>
     <ClInclude Include="pr_common.h" />
     <ClInclude Include="..\..\include\utils\app_skeleton.h">
       <Filter>utils</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\utils\markers.h">
       <Filter>utils</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_distributed_worklist.h">
-      <Filter>groute</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\graphs\common.h">
       <Filter>groute\graphs</Filter>
@@ -68,12 +68,6 @@
       <Filter>groute\graphs</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\graphs\csr_graph.h">
-      <Filter>groute\graphs</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\fused_solver.h">
-      <Filter>groute\graphs</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\include\groute\graphs\traversal_algo.h">
       <Filter>groute\graphs</Filter>
     </ClInclude>
     <ClInclude Include="..\..\include\groute\internal\pinned_allocation.h">
@@ -88,11 +82,47 @@
     <ClInclude Include="..\..\include\groute\internal\cuda_utils.h">
       <Filter>groute\internal</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\cta_work.h">
+    <ClInclude Include="..\..\include\groute\communication.h">
       <Filter>groute</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\include\groute\fused_worker.h">
+    <ClInclude Include="..\..\include\groute\groute.h">
       <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\policy.h">
+      <Filter>groute</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\distributed_worklist.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\split_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_kernels.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_source.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\work_target.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\dwl\workers.cuh">
+      <Filter>groute\dwl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\counter.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\cta_scheduler.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\queue.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\groute\device\signal.cuh">
+      <Filter>groute\device</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\include\utils\graphs\traversal.h">
+      <Filter>utils\graphs</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -108,6 +138,5 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="pr_async.cu" />
-    <CudaCompile Include="pr_async_opt.cu" />
   </ItemGroup>
 </Project>

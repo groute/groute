@@ -27,8 +27,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef __GROUTE_CTA_WORK_H
-#define __GROUTE_CTA_WORK_H
+#ifndef __GROUTE_CTA_SCHEDULER_H
+#define __GROUTE_CTA_SCHEDULER_H
 
 #include <initializer_list>
 #include <vector>
@@ -37,7 +37,7 @@
 #include <cuda_runtime.h>
 #include <mutex>
 
-#include "worklist.h"
+#include <cub/util_ptx.cuh>
 
 
 //#define NO_CTA_WARP_INTRINSICS 
@@ -96,16 +96,16 @@ namespace dev {
         template <typename TWork>
         __device__ __forceinline__ static void schedule(np_local<TMetaData>& np_local, TWork work)
         {
-            const int WP_SIZE = 32;
-            const int TB_SIZE = 256;
+            const int WP_SIZE = CUB_PTX_WARP_THREADS;
+            const int TB_SIZE = blockDim.x;
 
-            const int NP_WP_CROSSOVER = WP_SIZE;
-            const int NP_TB_CROSSOVER = TB_SIZE;
+            const int NP_WP_CROSSOVER = CUB_PTX_WARP_THREADS;
+            const int NP_TB_CROSSOVER = blockDim.x;
 
 #ifndef NO_CTA_WARP_INTRINSICS
             typedef union np_shared<empty_np, tb_np<TMetaData>, empty_np> np_shared_type;
 #else
-            typedef union np_shared<empty_np, tb_np<TMetaData>, warp_np<TB_SIZE / WP_SIZE, TMetaData>> np_shared_type;
+            typedef union np_shared<empty_np, tb_np<TMetaData>, warp_np<32, TMetaData>> np_shared_type; // 32 is max number of warps in block
 #endif
 
             __shared__ np_shared_type np_shared;
@@ -179,7 +179,7 @@ namespace dev {
             // Second scheduler: tackle medium-degree work items using the warp 
             //
 #ifdef NO_CTA_WARP_INTRINSICS
-            const int warp_id = threadIdx.x / WP_SIZE;
+            const int warp_id = cub::WarpId();
 #endif
             const int lane_id = cub::LaneId();
 
@@ -249,4 +249,4 @@ namespace dev {
 }
 }
 
-#endif // __GROUTE_CTA_WORK_H
+#endif // __GROUTE_CTA_SCHEDULER_H

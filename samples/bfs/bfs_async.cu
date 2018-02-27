@@ -26,6 +26,7 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
+
 #include <vector>
 #include <algorithm>
 #include <thread>
@@ -34,29 +35,20 @@
 
 #include <gflags/gflags.h>
 
-#include <groute/event_pool.h>
-#include <groute/distributed_worklist.h>
-
-#include <utils/parser.h>
-#include <utils/utils.h>
-#include <utils/stopwatch.h>
-#include <utils/markers.h>
-
+#include <groute/device/cta_scheduler.cuh>
 #include <groute/graphs/csr_graph.h>
-#include <groute/graphs/traversal_algo.h>
-#include <groute/cta_work.h>
+#include <groute/dwl/distributed_worklist.cuh>
+#include <groute/dwl/workers.cuh>
+
+#include <utils/graphs/traversal.h>
 
 #include "bfs_common.h"
 
 DEFINE_int32(source_node, 0, "The source node for the BFS traversal (clamped to [0, nnodes-1])");
-
 const level_t INF = UINT_MAX;
 
-#define GTID (blockIdx.x * blockDim.x + threadIdx.x)
+namespace bfs {
 
-
-namespace bfs
-{
     struct LevelData
     {
         index_t node;
@@ -69,136 +61,91 @@ namespace bfs
     typedef index_t local_work_t;
     typedef LevelData remote_work_t;
 
-    __global__ void BFSInit(level_t* levels, int nnodes)
+    __global__ void BFSMemsetKernel(level_t* levels, int nnodes)
     {
-        int tid = GTID;
+        int tid = TID_1D;
         if (tid < nnodes)
         {
             levels[tid] = INF;
         }
     }
 
-    __global__ void BFSInit(level_t* levels, int nnodes, index_t source)
+    template<bool CTAScheduling = true> 
+    /// BFS work with Collective Thread Array scheduling for exploiting nested parallelism 
+    struct BFSWork  
     {
-        int tid = GTID;
-        if (tid < nnodes)
+        template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
+        __device__ static void work(
+            const WorkSource& work_source, WorkTarget& work_target,
+            const TGraph& graph, TGraphDatum& levels_datum
+            )
         {
-            levels[tid] = tid == source ? 0 : INF;
-        }
-    }
+            uint32_t tid = TID_1D;
+            uint32_t nthreads = TOTAL_THREADS_1D;
 
+            uint32_t work_size = work_source.get_size();
+            uint32_t work_size_rup = round_up(work_size, blockDim.x) * blockDim.x; // we want all threads in active blocks to enter the loop
 
-
-    // -------------- Nested Parallelism kernel ----------------
-
-    template<
-        typename TGraph,
-        typename TGraphDatum,
-        typename WorkTarget>
-    struct BFSEdgeOperation
-    {
-        TGraph&         graph;
-        TGraphDatum&    levels_datum;
-        WorkTarget&     work_target;
-
-        __device__ __forceinline__ BFSEdgeOperation(TGraph& graph, TGraphDatum& levels_datum, WorkTarget& work_target) :
-            graph(graph), levels_datum(levels_datum), work_target(work_target)
-        {
-
-        }
-
-        __device__ __forceinline__ void operator()(index_t edge, level_t next_level)
-        {
-            index_t dest = graph.edge_dest(edge);
-            if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
+            for (uint32_t i = 0 + tid; i < work_size_rup; i += nthreads)
             {
-                work_target.append_work(graph, dest);
-            }
-        }
-    };
+                groute::dev::np_local<level_t> np_local = { 0, 0, 0 };
 
-   /*
-    * Optimized Nested Parallelism version of the BFS kernel
-    */
-    template<
-        typename TGraph,
-        typename TGraphDatum,
-        typename WorkSource, typename WorkTarget>
-        __global__ void BFSKernel__NestedParallelism__(TGraph graph, TGraphDatum levels_datum, WorkSource work_source, WorkTarget work_target)
-    {
-        int tid = TID_1D;
-        unsigned nthreads = TOTAL_THREADS_1D;
+                if (i < work_size)
+                {
+                    index_t node = work_source.get_work(i);
+                    np_local.start = graph.begin_edge(node);
+                    np_local.size = graph.end_edge(node) - np_local.start;
+                    np_local.meta_data = levels_datum.get_item(node) + 1;
+                }
 
-        uint32_t work_size = work_source.get_size();
-        uint32_t work_size_rup = round_up(work_size, blockDim.x) * blockDim.x; // we want all threads in active blocks to enter the loop
-
-#ifndef NP_LAMBDA
-        BFSEdgeOperation<TGraph, TGraphDatum, WorkTarget> op(graph, levels_datum, work_target);
-#endif
-
-        for (uint32_t i = 0 + tid; i < work_size_rup; i += nthreads)
-        {
-            groute::dev::np_local<level_t> np_local = { 0, 0, 0 };
-
-            if (i < work_size)
-            {
-                index_t node = work_source.get_work(i);
-                np_local.start = graph.begin_edge(node);
-                np_local.size = graph.end_edge(node) - np_local.start;
-                np_local.meta_data = levels_datum.get_item(node) + 1;
-            }
-
-#ifdef NP_LAMBDA
-            groute::dev::CTAWorkScheduler<level_t>::template schedule(
-                np_local, 
-                [&graph, &levels_datum, &work_target](index_t edge, level_t next_level)
+                groute::dev::CTAWorkScheduler<level_t>::template schedule(
+                    np_local,
+                    [&work_target, &graph, &levels_datum](index_t edge, level_t next_level)
                 {
                     index_t dest = graph.edge_dest(edge);
                     if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
                     {
-                        work_target.append_work(graph, dest);
+                        work_target.append_work(LevelData(dest, next_level));
                     }
                 }
-                );      
-#else
-            groute::dev::CTAWorkScheduler<level_t>::schedule(np_local, op);
-#endif
+                );
+            }
         }
-    }
+    };
 
-    // -------------- Nested Parallelism end ----------------
-
-
-
-
-    template<
-        typename TGraph,
-        typename TGraphDatum,
-        typename WorkSource, typename WorkTarget>
-        __global__ void BFSKernel(TGraph graph, TGraphDatum levels_datum, WorkSource work_source, WorkTarget work_target)
+    template<>
+    /// BFS work without CTA support
+    struct BFSWork< false > 
     {
-        int tid = TID_1D;
-        unsigned nthreads = TOTAL_THREADS_1D;
-
-        uint32_t work_size = work_source.get_size();
-
-        for (uint32_t i = 0 + tid; i < work_size; i += nthreads)
+        template<typename WorkSource, typename WorkTarget, typename TGraph, typename TGraphDatum>
+        __device__ static void work(
+            const WorkSource& work_source, WorkTarget& work_target,
+            const TGraph& graph, TGraphDatum& levels_datum
+            )
         {
-            index_t node = work_source.get_work(i);
-            level_t next_level = levels_datum.get_item(node) + 1;
+            uint32_t tid = TID_1D;
+            uint32_t nthreads = TOTAL_THREADS_1D;
 
-            for (index_t edge = graph.begin_edge(node), end_edge = graph.end_edge(node); edge < end_edge; ++edge)
+            uint32_t work_size = work_source.get_size();
+
+            for (uint32_t i = 0 + tid; i < work_size; i += nthreads)
             {
-                index_t dest = graph.edge_dest(edge);
-                if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
+                index_t node = work_source.get_work(i);
+                level_t next_level = levels_datum.get_item(node) + 1;
+
+                for (index_t edge = graph.begin_edge(node), end_edge = graph.end_edge(node); edge < end_edge; ++edge)
                 {
-                    work_target.append_work(graph, dest);
+                    index_t dest = graph.edge_dest(edge);
+                    if (next_level < atomicMin(levels_datum.get_item_ptr(dest), next_level))
+                    {
+                        work_target.append_work(LevelData(dest, next_level));
+                    }
                 }
             }
         }
-    }
+    };
 
-    struct SplitOps
+    struct DWCallbacks
     {
     private:
         groute::graphs::dev::CSRGraphSeg m_graph_seg;
@@ -206,10 +153,12 @@ namespace bfs
 
     public:
         template<typename...UnusedData>
-        SplitOps(const groute::graphs::dev::CSRGraphSeg& graph_seg, const groute::graphs::dev::GraphDatum<level_t>& levels_datum, UnusedData&... data)
+        DWCallbacks(const groute::graphs::dev::CSRGraphSeg& graph_seg, const groute::graphs::dev::GraphDatum<level_t>& levels_datum, UnusedData&... data)
             : m_graph_seg(graph_seg), m_levels_datum(levels_datum)
         {
         }
+
+        DWCallbacks() { }
 
         __device__ __forceinline__ groute::SplitFlags on_receive(const remote_work_t& work)
         {
@@ -221,6 +170,11 @@ namespace bfs
             }
 
             return groute::SF_Pass;
+        }
+
+        __device__ __forceinline__ bool should_defer(const local_work_t& work, const level_t& global_threshold)
+        {
+            return m_levels_datum[work] > global_threshold;
         }
 
         __device__ __forceinline__ groute::SplitFlags on_send(local_work_t work)
@@ -241,113 +195,56 @@ namespace bfs
         }
     };
 
-    /*
-    * @brief A per device BFS problem
-    */
-    template<typename TGraph, typename TGraphDatum>
-    class Problem
-    {
-    private:
-        TGraph m_graph;
-        TGraphDatum m_levels_datum;
-
-    public:
-        Problem(const TGraph& graph, const TGraphDatum& levels_datum) :
-            m_graph(graph), m_levels_datum(levels_datum)
-        {
-        }
-
-        void Init(groute::Stream& stream) const
-        {
-            dim3 grid_dims, block_dims;
-            KernelSizing(grid_dims, block_dims, m_levels_datum.size);
-
-            Marker::MarkWorkitems(m_levels_datum.size, "BFSInit");
-            BFSInit << < grid_dims, block_dims, 0, stream.cuda_stream >> >(
-                m_levels_datum.data_ptr, m_levels_datum.size);
-        }
-
-        void Init(groute::Worklist<index_t>& in_wl, groute::Stream& stream) const
-        {
-            index_t source_node = min(max(0, FLAGS_source_node), m_graph.nnodes - 1);
-
-            dim3 grid_dims, block_dims;
-            KernelSizing(grid_dims, block_dims, m_levels_datum.size);
-
-            Marker::MarkWorkitems(m_levels_datum.size, "BFSInit");
-
-            BFSInit << < grid_dims, block_dims, 0, stream.cuda_stream >> >(
-                m_levels_datum.data_ptr, m_levels_datum.size, source_node);
-
-            in_wl.AppendItemAsync(stream.cuda_stream, source_node); // add the first item to the worklist
-        }
-
-        template<typename TWorklist, bool WarpAppend = true>
-        void Relax(const groute::Segment<index_t>& work, TWorklist& output_worklist, groute::Stream& stream)
-        {
-            if (work.Empty()) return;
-
-            dim3 grid_dims, block_dims;
-            KernelSizing(grid_dims, block_dims, work.GetSegmentSize());
-
-            if (FLAGS_cta_np)
-            {
-                Marker::MarkWorkitems(work.GetSegmentSize(), "BFSKernel__NestedParallelism__");
-                BFSKernel__NestedParallelism__
-                    <TGraph, TGraphDatum, groute::dev::WorkSourceArray<index_t>, WorkTargetWorklist>
-                    <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
-                    m_graph, m_levels_datum,
-                    groute::dev::WorkSourceArray<index_t>(work.GetSegmentPtr(), work.GetSegmentSize()),
-                    WorkTargetWorklist(output_worklist)
-                    );
-            }
-            else
-            {
-                Marker::MarkWorkitems(work.GetSegmentSize(), "BFSKernel");
-                BFSKernel
-                    <TGraph, TGraphDatum, groute::dev::WorkSourceArray<index_t>, WorkTargetWorklist>
-                    <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
-                    m_graph, m_levels_datum,
-                    groute::dev::WorkSourceArray<index_t>(work.GetSegmentPtr(), work.GetSegmentSize()),
-                    WorkTargetWorklist(output_worklist)
-                    );
-            }
-        }
-    };
-
     struct Algo
     {
         static const char* NameLower()      { return "bfs"; }
         static const char* Name()           { return "BFS"; }
 
-        static void Init(
-            groute::graphs::traversal::Context<bfs::Algo>& context,
+        static void HostInit(
+            utils::traversal::Context<bfs::Algo>& context,
             groute::graphs::multi::CSRGraphAllocator& graph_manager,
-            groute::router::Router<remote_work_t>& worklist_router,
-            groute::DistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
+            groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist)
         {
-            index_t source_node = min(max(0, FLAGS_source_node), context.host_graph.nnodes - 1);
+            // Get a valid source_node from flag 
+            index_t source_node = min(max((index_t)0, (index_t)FLAGS_source_node), context.host_graph.nnodes - 1);
 
-            auto partitioner = graph_manager.GetGraphPartitioner();
-            if (partitioner->NeedsReverseLookup())
-            {
-                source_node = partitioner->GetReverseLookupFunc()(source_node);
-            }
+            // Map to the (possibly new) partitioned vertex space
+            source_node = graph_manager.GetGraphPartitioner()->ReverseLookup(source_node);
 
-            // report the initial work
-            distributed_worklist.ReportWork(1);
+            // Host endpoint for sending initial work  
+            groute::Endpoint host = groute::Endpoint::HostEndpoint(0);
+
+            // Report the initial work
+            distributed_worklist.ReportInitialWork(1, host);
 
             std::vector<remote_work_t> initial_work;
             initial_work.push_back(remote_work_t(source_node, 0));
+            distributed_worklist
+                .GetLink(host)
+                .Send(groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
+        }
 
-            groute::router::ISender<remote_work_t>* work_sender = worklist_router.GetSender(groute::Device::Host);
-            work_sender->Send(
-                groute::Segment<remote_work_t>(&initial_work[0], 1), groute::Event());
-            work_sender->Shutdown();
+        template<typename TGraph, typename TGraphDatum>
+        static void DeviceMemset(groute::Stream& stream, TGraph graph, TGraphDatum levels_datum)
+        {
+            dim3 grid_dims, block_dims;
+            KernelSizing(grid_dims, block_dims, levels_datum.size);
+
+            BFSMemsetKernel <<< grid_dims, block_dims, 0, stream.cuda_stream >>>(
+                levels_datum.data_ptr, levels_datum.size);
+        }
+
+        template<typename TGraph, typename TGraphDatum>
+        static void DeviceInit(
+            groute::Endpoint endpoint, groute::Stream& stream, 
+            groute::IDistributedWorklist<local_work_t, remote_work_t>& distributed_worklist, 
+            groute::IDistributedWorklistPeer<local_work_t, remote_work_t, DWCallbacks>* peer, 
+            TGraph graph, TGraphDatum levels_datum)
+        {
         }
 
         template<typename TGraphAllocator, typename TGraphDatum, typename...UnusedData>
-        static std::vector<level_t> Gather(TGraphAllocator& graph_allocator, TGraphDatum& levels_datum, UnusedData&... data)
+        static const std::vector<level_t>& Gather(TGraphAllocator& graph_allocator, TGraphDatum& levels_datum, UnusedData&... data)
         {
             graph_allocator.GatherDatum(levels_datum);
             return levels_datum.GetHostData();
@@ -356,7 +253,7 @@ namespace bfs
         template<typename...UnusedData>
         static std::vector<level_t> Host(groute::graphs::host::CSRGraph& graph, UnusedData&... data)
         {
-            return BFSHost(graph, min(max(0, FLAGS_source_node), graph.nnodes - 1));
+            return BFSHost(graph, min(max((index_t)0, (index_t)FLAGS_source_node), graph.nnodes - 1));
         }
 
         static int Output(const char *file, const std::vector<level_t>& levels)
@@ -369,34 +266,52 @@ namespace bfs
             return BFSCheckErrors(levels, regression);
         }
     };
+
+    using NodeLevelDatumType = groute::graphs::multi::NodeOutputGlobalDatum < level_t > ;
+
+    template<bool IterationFusion = true, bool CTAScheduling = true>
+    using FusedWorkerType = groute::FusedWorker <
+        IterationFusion, local_work_t, remote_work_t, int, DWCallbacks, BFSWork<CTAScheduling>,
+        groute::graphs::dev::CSRGraphSeg, NodeLevelDatumType::DeviceObjectType> ;
+    
+    template<bool CTAScheduling = true>
+    using WorkerType = groute::Worker <
+        local_work_t, remote_work_t, DWCallbacks, BFSWork<CTAScheduling>,
+        groute::graphs::dev::CSRGraphSeg, NodeLevelDatumType::DeviceObjectType> ;
+
+    template<typename TWorker>
+    using RunnerType = utils::traversal::Runner <
+        Algo, TWorker, DWCallbacks, local_work_t, remote_work_t,
+        NodeLevelDatumType > ;
+}
+
+template<typename TWorker>
+bool TestBFSAsyncMultiTemplate(int ngpus)
+{
+    bfs::RunnerType<TWorker> runner;
+    bfs::NodeLevelDatumType levels_datum;
+    return runner(ngpus, FLAGS_prio_delta, levels_datum);
+}
+
+bool TestBFSAsyncMultiOptimized(int ngpus)
+{
+    return FLAGS_cta_np
+        ? FLAGS_iteration_fusion
+            ? TestBFSAsyncMultiTemplate< bfs::FusedWorkerType< true, true   >>(ngpus)
+            : TestBFSAsyncMultiTemplate< bfs::FusedWorkerType< false, true  >>(ngpus)
+        : FLAGS_iteration_fusion                               
+            ? TestBFSAsyncMultiTemplate< bfs::FusedWorkerType< true, false  >>(ngpus)
+            : TestBFSAsyncMultiTemplate< bfs::FusedWorkerType< false, false >>(ngpus);
 }
 
 bool TestBFSAsyncMulti(int ngpus)
 {
-    typedef bfs::Problem<groute::graphs::dev::CSRGraphSeg, groute::graphs::dev::GraphDatum<level_t>> Problem;
-
-    groute::graphs::traversal::__MultiRunner__ <
-        bfs::Algo,
-        Problem,
-        groute::graphs::traversal::__GenericMultiSolver__<bfs::Algo, Problem, bfs::local_work_t, bfs::remote_work_t>,
-        bfs::SplitOps,
-        bfs::local_work_t,
-        bfs::remote_work_t,
-        groute::graphs::multi::NodeOutputGlobalDatum<level_t> > runner;
-
-    groute::graphs::multi::NodeOutputGlobalDatum<level_t> levels_datum;
-
-    return runner(ngpus, levels_datum);
+    return FLAGS_cta_np
+        ? TestBFSAsyncMultiTemplate< bfs::WorkerType< true  >>(ngpus)
+        : TestBFSAsyncMultiTemplate< bfs::WorkerType< false >>(ngpus);
 }
 
 bool TestBFSSingle()
 {
-    groute::graphs::traversal::__SingleRunner__ <
-        bfs::Algo,
-        bfs::Problem<groute::graphs::dev::CSRGraph, groute::graphs::dev::GraphDatum<level_t>>,
-        groute::graphs::single::NodeOutputDatum<level_t> > runner;
-
-    groute::graphs::single::NodeOutputDatum<level_t> levels_datum;
-
-    return runner(levels_datum);
+    return TestBFSAsyncMultiOptimized(1);
 }

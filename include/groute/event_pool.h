@@ -146,10 +146,21 @@ namespace groute {
             );
         }
 
+        static Event Record(const Stream& stream)
+        {
+            return Record(stream.cuda_stream);
+        }
+
         void Wait(cudaStream_t stream) const
         {
             if (m_internal_event == nullptr) return; // dummy event
             m_internal_event->Wait(stream);
+        }
+
+        void Wait(const Stream& stream) const
+        {
+            if (m_internal_event == nullptr) return; // dummy event
+            m_internal_event->Wait(stream.cuda_stream);
         }
 
         void Sync() const
@@ -228,9 +239,10 @@ namespace groute {
     };
 
     /**
-    * @brief A simple helper class for aggregating events with some pre known count until setting a promise
+    * @brief Helper class for aggregating an event group with some preknown reporter count until setting an Event promise
+    * @note Used for managing send operations in the Router
     */
-    class AggregatedEventPromise
+    class EventGroupPromise
     {
     private:
         std::promise<Event> m_promise;
@@ -247,13 +259,13 @@ namespace groute {
         }
     
     public:
-        AggregatedEventPromise(int reporters_count = 0) : m_reporters_count(reporters_count)
+        EventGroupPromise(int reporters_count = 0) : m_reporters_count(reporters_count)
         {
             m_ev_group = std::make_shared<EventGroup>();
             m_shared_future = m_promise.get_future();
         }
     
-        ~AggregatedEventPromise()
+        ~EventGroupPromise()
         {
             assert(is_ready(m_shared_future));
         }
@@ -285,7 +297,7 @@ namespace groute {
         std::vector<cudaEvent_t> m_events;
         std::deque<cudaEvent_t> m_pool;
 
-        int m_dev_id; // the real device id
+        int m_physical_dev; // the physical device id
         mutable std::mutex m_mutex;
 
         void VerifyDev() const
@@ -293,9 +305,9 @@ namespace groute {
 #ifndef NDEBUG
             int actual_dev;
             GROUTE_CUDA_CHECK(cudaGetDevice(&actual_dev));
-            if(actual_dev != m_dev_id)
+            if(actual_dev != m_physical_dev)
             {
-                printf("\nWarning: actual dev: %d, expected dev: %d\n", actual_dev, m_dev_id);
+                printf("\nWarning: actual dev: %d, expected dev: %d\n", actual_dev, m_physical_dev);
             }
 #endif
         }
@@ -315,8 +327,8 @@ namespace groute {
         }
 
     public:
-        EventPool(int dev_id, size_t cached_evs = 0) : 
-            m_dev_id(dev_id)
+        EventPool(int physical_dev, size_t cached_evs = 0) : 
+            m_physical_dev(physical_dev)
         {
             m_events.reserve(cached_evs);
             CacheEvents(cached_evs);
@@ -324,7 +336,7 @@ namespace groute {
 
         void CacheEvents(size_t cached_evs)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(m_dev_id));
+            GROUTE_CUDA_CHECK(cudaSetDevice(m_physical_dev));
 
             std::lock_guard<std::mutex> guard(m_mutex);
 
@@ -338,7 +350,7 @@ namespace groute {
         int GetCachedEventsNum() const
         {
             std::lock_guard<std::mutex> guard(m_mutex);
-            return m_events.size();
+            return (int)m_events.size();
         }
 
         ~EventPool()
@@ -382,79 +394,10 @@ namespace groute {
                 }
             );
         }
-    };
 
-    enum StreamPriority
-    {
-        SP_Default, SP_High, SP_Low
-    };
-
-    class Stream
-    {
-    public:
-        cudaStream_t    cuda_stream;
-        cudaEvent_t     sync_event;
-
-        Stream(int dev_id, StreamPriority priority = SP_Default)
+        Event Record(const Stream& stream)
         {
-            GROUTE_CUDA_CHECK(cudaSetDevice(dev_id));
-            Init(priority);
-        }
-
-        Stream(StreamPriority priority = SP_Default)
-        {
-            Init(priority);
-        }
-
-        void Init(StreamPriority priority)
-        {
-            if (priority == SP_Default)
-            {
-                GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamNonBlocking));
-                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
-            }
-
-            else
-            {
-                int leastPriority, greatestPriority;
-                cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority); // range: [*greatestPriority, *leastPriority]
-
-                GROUTE_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, priority == SP_High ? greatestPriority : leastPriority));
-                GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
-            }
-        }
-
-        Stream(const Stream& other) = delete;
-
-        Stream(Stream&& other) : cuda_stream(other.cuda_stream), sync_event(other.sync_event)
-        {
-            other.cuda_stream = nullptr;
-            other.sync_event = nullptr;
-        }
-
-        Stream& operator=(const Stream& other) = delete;
-
-        Stream& operator=(Stream&& other) 
-        {
-            this->cuda_stream = other.cuda_stream;
-            this->sync_event = other.sync_event;
-
-            other.cuda_stream = nullptr;
-            other.sync_event = nullptr;
-
-            return *this;
-        }
-
-        ~Stream()
-        {
-            if(cuda_stream != nullptr) GROUTE_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
-            if(sync_event != nullptr) GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
-        }
-
-        void Sync() const
-        {
-            GROUTE_CUDA_CHECK(cudaEventRecord(sync_event, cuda_stream));
-            GROUTE_CUDA_CHECK(cudaEventSynchronize(sync_event));
+            return Record(stream.cuda_stream);
         }
     };
 }

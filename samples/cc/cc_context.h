@@ -65,15 +65,17 @@ namespace cc
     class Context : public groute::Context // the global context for the cc problem solving  
     {
     public:
-        groute::pinned_vector<groute::graphs::Edge>   host_edges;
-        std::vector<int>            host_parents;
+        groute::pinned_vector<groute::graphs::Edge>     host_edges;
+        std::vector<component_t>                        host_parents;
 
         int ngpus;
         unsigned int nvtxs, nedges;
         
-        Context(std::string &graphfile, bool ggr, bool verbose, int ngpus) : 
+        Context(std::string &graphfile, int ngpus) : 
             groute::Context(ngpus), ngpus(ngpus)
         {
+            this->configuration.verbose = FLAGS_verbose;
+
             graph_t *graph;
 
             if (graphfile == "") {
@@ -81,26 +83,20 @@ namespace cc
                 exit(0);
             }
 
-            printf("\nLoading graph %s (%d)\n", graphfile.substr(graphfile.find_last_of('\\') + 1).c_str(), ggr);
-            graph = GetCachedGraph(graphfile, ggr);
+            printf("\nLoading graph %s (%d)\n", graphfile.substr(graphfile.find_last_of('\\') + 1).c_str(), FLAGS_ggr);
+            graph = GetCachedGraph(graphfile, FLAGS_ggr);
 
             if (graph->nvtxs == 0) {
-                printf("Empty graph!\n");
+                printf("Empty graph, exiting\n");
                 exit(0);
             }
 
-            printf("\n----- Running CC Async -----\n\n");
-
-            if (FLAGS_verbose)
-            {
-                if (!FLAGS_undirected)  printf("undirected=false, expecting a directed (not symmetric) graph, keeping all edges\n");
-                else                    printf("undirected=true,  expecting an undirected (symmetric) graph, removing bidirectional edges\n");
-            }
-
-            LoadGraph(host_edges, &nvtxs, &nedges, graph, false, FLAGS_undirected);
+            LoadGraph(host_edges, &nvtxs, &nedges, graph, FLAGS_undirected);
             host_parents.resize(nvtxs);
 
-            if (verbose) {
+            printf("\n----- Running CC Async -----\n\n");
+
+            if (this->configuration.verbose) {
                 printf("The graph has %d vertices, and %d edges (average degree: %f)\n", nvtxs, nedges, (float)nedges / nvtxs);
             }
         }

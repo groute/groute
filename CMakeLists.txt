@@ -69,19 +69,19 @@ cuda_add_executable(cc src/utils/parser.cpp src/utils/utils.cpp
 target_link_libraries(cc ${EXTRA_LIBS})
 
 cuda_add_executable(bfs src/utils/parser.cpp src/utils/utils.cpp src/groute/graphs/csr_graph.cpp 
-                    samples/bfs/bfs_async.cu samples/bfs/bfs_async_opt.cu
+                    samples/bfs/bfs_async.cu
                     samples/bfs/bfs_host.cpp 
 					samples/bfs/main.cpp)
 target_link_libraries(bfs ${EXTRA_LIBS})
 
 cuda_add_executable(sssp src/utils/parser.cpp src/utils/utils.cpp src/groute/graphs/csr_graph.cpp
-                    samples/sssp/sssp_async.cu samples/sssp/sssp_async_opt.cu
+                    samples/sssp/sssp_async.cu
                     samples/sssp/sssp_host.cpp 
 					samples/sssp/main.cpp)
 target_link_libraries(sssp ${EXTRA_LIBS})
 
 cuda_add_executable(pr src/utils/parser.cpp src/utils/utils.cpp src/groute/graphs/csr_graph.cpp
-					samples/pr/pr_async.cu samples/pr/pr_async_opt.cu samples/pr/pr_host.cpp 
+					samples/pr/pr_async.cu samples/pr/pr_host.cpp 
 					samples/pr/main.cpp)
 target_link_libraries(pr ${EXTRA_LIBS})
 
@@ -103,8 +103,8 @@ endif()
 # Groute async component tests
 cuda_add_executable(async-tests test/async-tests/main.cpp
                     test/async-tests/router_test.cu
-                    test/async-tests/worklist_test.cu
-                    test/async-tests/circular_worklist_test.cu)
+                    test/async-tests/dwl_test.cu
+                    test/async-tests/pc_queue_test.cu)
 
 target_link_libraries(async-tests gtest pthread dl ${EXTRA_LIBS})
 cuda_add_cublas_to_target(async-tests)

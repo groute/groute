@@ -54,7 +54,7 @@ namespace cc
     {
         const Context& context;
 
-        int dev;
+        groute::Endpoint endpoint;
         dim3 block_dims;
         size_t compressed_size;
 
@@ -69,9 +69,9 @@ namespace cc
 
         Problem(
             const Context& context, 
-            const Partition& partition, int dev, dim3 block_dims) :
+            const Partition& partition, groute::Endpoint endpoint, dim3 block_dims) :
             context(context), partition(partition), 
-            dev(dev), block_dims(block_dims), compressed_size(0)
+            endpoint(endpoint), block_dims(block_dims), compressed_size(0)
         {
             size_t parents_ss; // The parent segment size
             size_t parents_so; // The parent segment offset
@@ -81,7 +81,7 @@ namespace cc
 
             int* parents_ptr;
 
-            context.SetDevice(dev);
+            context.SetDevice(endpoint);
             GROUTE_CUDA_CHECK(cudaMalloc(&parents_ptr, parents_ss * sizeof(int)));
             GROUTE_CUDA_CHECK(cudaStreamCreateWithFlags(&compute_stream, cudaStreamNonBlocking));
             GROUTE_CUDA_CHECK(cudaEventCreateWithFlags(&sync_event, cudaEventDisableTiming));
@@ -91,7 +91,7 @@ namespace cc
 
         ~Problem()
         {
-            context.SetDevice(dev);
+            context.SetDevice(endpoint);
             GROUTE_CUDA_CHECK(cudaFree(parents.GetSegmentPtr()));
             GROUTE_CUDA_CHECK(cudaStreamDestroy(compute_stream));
             GROUTE_CUDA_CHECK(cudaEventDestroy(sync_event));
@@ -106,7 +106,7 @@ namespace cc
         }
 
         template<bool R1 = false>
-        void Work(const groute::router::PendingSegment<Edge>& edge_seg)
+        void Work(const groute::PendingSegment<Edge>& edge_seg)
         {
             dim3 grid_dims(round_up(edge_seg.GetSegmentSize(), block_dims.x), 1, 1);
 
@@ -121,7 +121,7 @@ namespace cc
             compressed_size = 0;
         }
 
-        void WorkAtomic(const groute::router::PendingSegment<Edge>& edge_seg)
+        void WorkAtomic(const groute::PendingSegment<Edge>& edge_seg)
         {
             dim3 grid_dims(round_up(edge_seg.GetSegmentSize(), block_dims.x), 1, 1);
             
@@ -136,7 +136,7 @@ namespace cc
             compressed_size = 0;
         }
 
-        void Merge(const groute::router::PendingSegment<int>& merge_seg)
+        void Merge(const groute::PendingSegment<int>& merge_seg)
         {
             assert(merge_seg.GetSegmentOffset() >= parents.GetSegmentOffset());
             assert(merge_seg.GetSegmentOffset() - parents.GetSegmentOffset() + 
@@ -186,7 +186,7 @@ namespace cc
             compressed_size = size; // keep the compress size 
         }
 
-        void Compress(const groute::router::PendingSegment<int>& merged_seg)
+        void Compress(const groute::PendingSegment<int>& merged_seg)
         {
             // makes the decision what part to compress after a merge  
             // compresses from begining of local parents and up to covering the merged segment  
@@ -217,7 +217,7 @@ namespace cc
 
         groute::Event Record() const
         {
-            return context.RecordEvent(dev, compute_stream);
+            return context.RecordEvent(endpoint, compute_stream);
         }
 
         void Sync() const
@@ -246,16 +246,16 @@ namespace cc
 
         void Solve(const Configuration& configuration)
         {
-            context.SetDevice(problem.dev);
+            context.SetDevice(problem.endpoint);
 
             // Init
             problem.Init();
             
-            auto input_fut = edges_in.Receive();
-            auto reduce_fut = reduction_in.Receive();
+            auto input_fut = edges_in.PipelinedReceive();
+            auto reduce_fut = reduction_in.PipelinedReceive();
 
-            groute::router::PendingSegment<int> merge_seg;
-            groute::router::PendingSegment<Edge> input_seg;
+            groute::PendingSegment<int> merge_seg;
+            groute::PendingSegment<Edge> input_seg;
 
             for (int i = 0;; ++i)
             {
@@ -280,8 +280,8 @@ namespace cc
                 // Work atomic
                 problem.WorkAtomic(input_seg);
 
-                edges_in.ReleaseBuffer(input_seg, problem.Record()); // dismiss depends on the recorded event  
-                input_fut = edges_in.Receive();
+                edges_in.ReleaseReceiveBuffer(input_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                input_fut = edges_in.PipelinedReceive();
 
                 problem.Compress();   
 
@@ -301,8 +301,8 @@ namespace cc
                 // Merge
                 problem.Merge(merge_seg);
 
-                reduction_in.ReleaseBuffer(merge_seg, problem.Record()); // dismiss depends on the recorded event  
-                reduce_fut = reduction_in.Receive();
+                reduction_in.ReleaseReceiveBuffer(merge_seg.GetSegmentPtr(), problem.Record()); // dismiss depends on the recorded event  
+                reduce_fut = reduction_in.PipelinedReceive();
             }
 
             // Makes sure the entire local segment is compressed  
