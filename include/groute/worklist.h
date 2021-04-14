@@ -53,7 +53,7 @@ __device__ __forceinline__ int lane_id() { return threadIdx.x & (WARP_SIZE-1); }
 
 // TODO: Wrap ballot functionality
 __device__ __forceinline__ void warp_active_count(int &first, int& offset, int& total) {
-    unsigned int active = __ballot(1);
+    unsigned int active = __ballot_sync(__activemask(), 1);
     total = __popc(active);
     offset = __popc(active & cub::LaneMaskLt());
     first = __ffs(active) - 1;
@@ -95,8 +95,8 @@ namespace groute {
                     allocation = atomicAdd((uint32_t *)m_count, total);
                     assert(allocation + total <= m_capacity);
                 }
-    
-                allocation = cub::ShuffleIndex(allocation, first);
+
+                allocation = cub::ShuffleIndex<32>(allocation, first, __activemask());
                 m_data[allocation + offset] = item;
             }
 
@@ -110,7 +110,7 @@ namespace groute {
                     assert(allocation + warp_count <= m_capacity);
                 }
     
-                allocation = cub::ShuffleIndex(allocation, leader);
+                allocation = cub::ShuffleIndex<32>(allocation, leader, __activemask());
                 m_data[allocation + offset] = item;
             }
 
@@ -146,7 +146,7 @@ namespace groute {
 
             __device__ __forceinline__ void add_one_warp()
             {
-                int lanemask = __ballot(1);
+                int lanemask = __ballot_sync(__activemask(), 1);
                 int leader = __ffs(lanemask) - 1;
                     
                 if (lane_id() == leader) {
@@ -221,7 +221,7 @@ namespace groute {
                     assert((allocation + total) - *m_start < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
                 }
     
-                allocation = cub::ShuffleIndex(allocation, first);
+                allocation = cub::ShuffleIndex<32>(allocation, first, __activemask());
                 
                 if (POWER_OF_TWO)
                     m_data[(allocation + offset) & m_capacity] = item;
@@ -239,7 +239,7 @@ namespace groute {
                     assert((allocation + warp_count) - *m_start < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
                 }
     
-                allocation = cub::ShuffleIndex(allocation, leader);
+                allocation = cub::ShuffleIndex<32>(allocation, leader, __activemask());
                 
                 if (POWER_OF_TWO)
                     m_data[(allocation + offset) & m_capacity] = item;
@@ -270,7 +270,7 @@ namespace groute {
                     assert(*m_end - allocation < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
                 }
     
-                allocation = cub::ShuffleIndex(allocation, first);
+                allocation = cub::ShuffleIndex<32>(allocation, first, __activemask());
                 
                 if (POWER_OF_TWO)
                     m_data[(allocation + offset) & m_capacity] = item;
@@ -288,8 +288,8 @@ namespace groute {
                     assert(*m_end - allocation < (POWER_OF_TWO ? (m_capacity + 1) : m_capacity));
                 }
     
-                allocation = cub::ShuffleIndex(allocation, leader);
-                
+                allocation = cub::ShuffleIndex<32>(allocation, leader, __activemask());
+
                 if (POWER_OF_TWO)
                     m_data[(allocation + offset) & m_capacity] = item;
                 else

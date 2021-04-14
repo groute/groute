@@ -96,8 +96,8 @@ namespace groute
 
             bool is_high_prio = ops.is_high_prio(work, global_priority);
 
-            int high_mask = __ballot(is_high_prio ? 1 : 0);
-            int low_mask = __ballot(is_high_prio ? 0 : 1);
+            int high_mask = __ballot_sync(__activemask(), is_high_prio ? 1 : 0);
+            int low_mask = __ballot_sync(__activemask(), is_high_prio ? 0 : 1);
 
             if (is_high_prio)
             {

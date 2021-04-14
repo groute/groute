@@ -123,8 +123,8 @@ namespace bfs {
 
                                 // TODO: move ballot logic to a device structure   
 
-                                int owned_mask = __ballot(is_owned ? 1 : 0);
-                                int remote_mask = __ballot(is_owned ? 0 : 1);
+                                int owned_mask = __ballot_sync(__activemask(), is_owned ? 1 : 0);
+                                int remote_mask = __ballot_sync(__activemask(), is_owned ? 0 : 1);
 
                                 if (is_owned)
                                 {
@@ -177,8 +177,8 @@ namespace bfs {
 
                             // TODO: move ballot logic to a device structure   
 
-                            int owned_mask = __ballot(is_owned ? 1 : 0);
-                            int remote_mask = __ballot(is_owned ? 0 : 1);
+                            int owned_mask = __ballot_sync(__activemask(), is_owned ? 1 : 0);
+                            int remote_mask = __ballot_sync(__activemask(), is_owned ? 0 : 1);
 
                             if (is_owned)
                             {

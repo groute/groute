@@ -255,8 +255,8 @@ namespace sssp
                     {
                         if (graph.owns(dest))
                         {
-                            int near_mask = __ballot(distance + weight <= delta ? 1 : 0);
-                            int far_mask = __ballot(distance + weight <= delta ? 0 : 1);
+                            int near_mask = __ballot_sync(__activemask(), distance + weight <= delta ? 1 : 0);
+                            int far_mask = __ballot_sync(__activemask(), distance + weight <= delta ? 0 : 1);
 
                             if (distance + weight <= delta)
                             {
@@ -312,8 +312,8 @@ namespace sssp
                 {
                     if (graph.owns(dest))
                     {
-                        int near_mask = __ballot(distance + weight <= delta ? 1 : 0);
-                        int far_mask = __ballot(distance + weight <= delta ? 0 : 1);
+                        int near_mask = __ballot_sync(__activemask(), distance + weight <= delta ? 1 : 0);
+                        int far_mask = __ballot_sync(__activemask(), distance + weight <= delta ? 0 : 1);
 
                         if (distance + weight <= delta)
                         {
@@ -353,8 +353,8 @@ namespace sssp
             index_t node = work_source.get_work(tid);
             distance_t distance = node_distances.get_item(node);
 
-            int near_mask = __ballot(distance <= delta ? 1 : 0);
-            int far_mask = __ballot(distance <= delta ? 0 : 1);
+            int near_mask = __ballot_sync(__activemask(), distance <= delta ? 1 : 0);
+            int far_mask = __ballot_sync(__activemask(), distance <= delta ? 0 : 1);
 
             if (distance <= delta)
             {
