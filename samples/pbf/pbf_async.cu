@@ -94,14 +94,14 @@ __global__ void Filter(const T * __restrict__ in, int in_size,
     if (Pred::Test(value))
     {
         // Warp-aggregated filter
-        int lanemask = __ballot(1);
+        int lanemask = __ballot_sync(__activemask(), 1);
         int leader = __ffs(lanemask) - 1;
         int thread_offset = __popc(lanemask & ((1 << (threadIdx.x & 31)) - 1));
 
         int ptr_offset;
         if ((threadIdx.x & 31) == leader)
             ptr_offset = atomicAdd(out_size, __popc(lanemask));
-        ptr_offset = cub::ShuffleIndex(ptr_offset, leader);
+        ptr_offset = cub::ShuffleIndex<32>(ptr_offset, leader, __activemask());
         // End of warp-aggregated filter
 
         out[ptr_offset + thread_offset] = value;

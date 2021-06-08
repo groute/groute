@@ -183,19 +183,19 @@ namespace dev {
 #endif
             const int lane_id = cub::LaneId();
 
-            while (__any(np_local.size >= NP_WP_CROSSOVER))
+            while (__any_sync(__activemask(), np_local.size >= NP_WP_CROSSOVER))
             {
 
 #ifndef NO_CTA_WARP_INTRINSICS
                 // Compete for work scheduling  
-                int mask = __ballot(np_local.size >= NP_WP_CROSSOVER ? 1 : 0); 
+                int mask = __ballot_sync(__activemask(), np_local.size >= NP_WP_CROSSOVER ? 1 : 0);
                 // Select a deterministic winner  
                 int leader = __ffs(mask) - 1;   
 
                 // Broadcast data from the leader  
-                index_type start = cub::ShuffleIndex(np_local.start, leader);
-                index_type size = cub::ShuffleIndex(np_local.size, leader);
-                TMetaData meta_data = cub::ShuffleIndex(np_local.meta_data, leader);
+                index_type start = cub::ShuffleIndex<32>(np_local.start, leader, __activemask());
+                index_type size = cub::ShuffleIndex<32>(np_local.size, leader, __activemask());
+                TMetaData meta_data = cub::ShuffleIndex<32>(np_local.meta_data, leader, __activemask());
 
                 if (leader == lane_id)
                 {

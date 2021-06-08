@@ -128,9 +128,9 @@ namespace groute {
 
             if (WarpAppend)
             {
-                int filter_mask = __ballot(flags == SF_None ? 1 : 0);
-                int take_mask = __ballot(flags & SF_Take ? 1 : 0);
-                int pass_mask = __ballot(flags & SF_Pass ? 1 : 0);
+                int filter_mask = __ballot_sync(__activemask(), flags == SF_None ? 1 : 0);
+                int take_mask = __ballot_sync(__activemask(), flags & SF_Take ? 1 : 0);
+                int pass_mask = __ballot_sync(__activemask(), flags & SF_Pass ? 1 : 0);
                     // never inline the masks into the conditional branching below  
                     // although it may work. The compiler should optimize this anyhow, 
                     // but this avoids him from unifying the __ballot's 
