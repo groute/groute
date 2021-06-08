@@ -183,7 +183,7 @@ namespace dev {
 #endif
             const int lane_id = cub::LaneId();
 
-            while (__any_sync(0xffffffff, np_local.size >= NP_WP_CROSSOVER))
+            while (__any_sync(__activemask(), np_local.size >= NP_WP_CROSSOVER))
             {
 
 #ifndef NO_CTA_WARP_INTRINSICS
